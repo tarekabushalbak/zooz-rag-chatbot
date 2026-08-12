@@ -84,6 +84,7 @@ def ask_zooz(query):
 
     except Exception as e:
         duration = round(time.time() - start_time, 2)
+        print(f"CHATBOT ERROR: {repr(e)}")
         error_msg = f"אירעה שגיאה טכנית. אנא נסה שוב או פנה ל-info@zooz.co.il"
         log_to_csv(query, f"ERROR: {e}", duration)
         return error_msg, []
