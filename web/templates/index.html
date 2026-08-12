@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+    <meta charset="UTF-8">
+    <title>ZOOZ Assistant</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #0f2744 0%, #1a3a5c 50%, #0d5c8a 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding: 16px 20px;
+            text-align: center;
+            color: white;
+        }
+        .header h1 { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+        .header h1 span { color: #4fc3f7; }
+        .header p { font-size: 13px; opacity: 0.75; margin-top: 4px; }
+        .online-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            background: #4caf50;
+            border-radius: 50%;
+            margin-left: 6px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .chat-wrapper {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px 15px;
+        }
+        .chat-container {
+            width: 100%;
+            max-width: 780px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .messages {
+            background: rgba(255,255,255,0.97);
+            border-radius: 16px;
+            padding: 22px;
+            min-height: 420px;
+            max-height: 480px;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .messages::-webkit-scrollbar { width: 6px; }
+        .messages::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+        .welcome { text-align: center; color: #888; padding: 30px 0 10px; }
+        .welcome .avatar { font-size: 48px; margin-bottom: 10px; }
+        .welcome p { font-size: 15px; line-height: 1.7; color: #555; }
+        .user-msg {
+            background: linear-gradient(135deg, #1a3a5c, #0d5c8a);
+            color: white;
+            padding: 11px 16px;
+            border-radius: 18px 18px 4px 18px;
+            margin: 8px 0;
+            max-width: 72%;
+            float: right;
+            clear: both;
+            font-size: 14px;
+            line-height: 1.5;
+            box-shadow: 0 2px 8px rgba(26,58,92,0.3);
+        }
+        .bot-msg {
+            background: #f5f7fa;
+            color: #2c3e50;
+            padding: 12px 16px;
+            border-radius: 18px 18px 18px 4px;
+            margin: 8px 0;
+            max-width: 82%;
+            float: left;
+            clear: both;
+            line-height: 1.7;
+            font-size: 14px;
+            border-right: 3px solid #4fc3f7;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+        }
+        .sources {
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid #e8e8e8;
+            word-break: break-all;
+        }
+        .clearfix { clear: both; }
+        .suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .suggestion-btn {
+            background: rgba(255,255,255,0.12);
+            border: 1.5px solid rgba(255,255,255,0.4);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .suggestion-btn:hover {
+            background: rgba(255,255,255,0.25);
+            border-color: white;
+            transform: translateY(-1px);
+        }
+        .input-row { display: flex; gap: 10px; align-items: center; }
+        .input-row input {
+            flex: 1;
+            padding: 13px 18px;
+            border: none;
+            border-radius: 25px;
+            font-size: 15px;
+            outline: none;
+            background: rgba(255,255,255,0.95);
+            color: #2c3e50;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+        }
+        .input-row input::placeholder { color: #aaa; }
+        .send-btn {
+            background: linear-gradient(135deg, #4fc3f7, #0288d1);
+            color: white;
+            border: none;
+            padding: 13px 22px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 600;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .send-btn:hover { transform: translateY(-1px); }
+        .contact-bar {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px;
+            padding: 10px 16px;
+            text-align: center;
+            color: rgba(255,255,255,0.8);
+            font-size: 13px;
+            text-decoration: none;
+            display: block;
+            transition: all 0.2s;
+        }
+        .contact-bar:hover { background: rgba(255,255,255,0.18); color: white; }
+        .loading-dots span {
+            display: inline-block;
+            width: 7px; height: 7px;
+            background: #aaa;
+            border-radius: 50%;
+            margin: 0 2px;
+            animation: bounce 1.2s infinite;
+        }
+        .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-8px); } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ZOOZ <span>Assistant</span> <span class="online-dot"></span></h1>
+        <p>העוזר הווירטואלי של ZOOZ — שאל אותי הכל!</p>
+    </div>
+    <div class="chat-wrapper">
+        <div class="chat-container">
+            <div class="messages" id="messages">
+                <div class="welcome">
+                    <div class="avatar">🤖</div>
+                    <p>שלום! אני העוזר הווירטואלי של ZOOZ.<br>איך אוכל לעזור לך היום?</p>
+                </div>
+            </div>
+            <div class="suggestions">
+                <button class="suggestion-btn" onclick="askQuestion('מה השירותים של ZOOZ?')">מה השירותים של ZOOZ?</button>
+                <button class="suggestion-btn" onclick="askQuestion('מה זה חדשנות שיטתית?')">מה זה חדשנות שיטתית?</button>
+                <button class="suggestion-btn" onclick="askQuestion('איך ליצור קשר?')">איך ליצור קשר?</button>
+                <button class="suggestion-btn" onclick="askQuestion('מה ZOOZ יכולה לעשות עבורי?')">מה ZOOZ יכולה לעשות עבורי?</button>
+            </div>
+            <div class="input-row">
+                <input type="text" id="question" placeholder="כתוב את שאלתך כאן..."
+                    onkeypress="if(event.key==='Enter') sendQuestion()">
+                <button class="send-btn" onclick="sendQuestion()">שלח ➤</button>
+            </div>
+            <a href="mailto:info@zooz.co.il" class="contact-bar">
+                📧 צור קשר עם ZOOZ — info@zooz.co.il
+            </a>
+        </div>
+    </div>
+    <script>
+        function askQuestion(q) {
+            document.getElementById('question').value = q;
+            sendQuestion();
+        }
+        function sendQuestion() {
+            const q = document.getElementById('question').value.trim();
+            if (!q) return;
+            const messages = document.getElementById('messages');
+            messages.innerHTML += `<div class="user-msg">${q}</div><div class="clearfix"></div>`;
+            messages.innerHTML += `<div class="bot-msg" id="loading"><div class="loading-dots"><span></span><span></span><span></span></div></div><div class="clearfix"></div>`;
+            document.getElementById('question').value = '';
+            messages.scrollTop = messages.scrollHeight;
+            fetch('/ask', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({question: q})
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('loading').remove();
+                const sourcesHtml = data.sources ? `<div class="sources">מקורות: ${data.sources.join(', ')}</div>` : '';
+                messages.innerHTML += `<div class="bot-msg">${data.answer.replace(/\n/g,'<br>')}${sourcesHtml}</div><div class="clearfix"></div>`;
+                messages.scrollTop = messages.scrollHeight;
+            })
+            .catch(() => {
+                document.getElementById('loading').outerHTML = '<div class="bot-msg">אירעה שגיאה, נסה שוב.</div>';
+            });
+        }
+    </script>
+</body>
+</html>
