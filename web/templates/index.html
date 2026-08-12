@@ -96,6 +96,13 @@
             border-top: 1px solid #e8e8e8;
             word-break: break-all;
         }
+        .sources a {
+            color: #0288d1;
+            text-decoration: none;
+        }
+        .sources a:hover {
+            text-decoration: underline;
+        }
         .clearfix { clear: both; }
         .suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
         .suggestion-btn {
@@ -215,7 +222,9 @@
             .then(r => r.json())
             .then(data => {
                 document.getElementById('loading').remove();
-                const sourcesHtml = data.sources ? `<div class="sources">מקורות: ${data.sources.join(', ')}</div>` : '';
+                const sourcesHtml = data.sources && data.sources.length > 0
+                    ? `<div class="sources">מקורות: ${data.sources.map(url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`).join(', ')}</div>`
+                    : '';
                 messages.innerHTML += `<div class="bot-msg">${data.answer.replace(/\n/g,'<br>')}${sourcesHtml}</div><div class="clearfix"></div>`;
                 messages.scrollTop = messages.scrollHeight;
             })
