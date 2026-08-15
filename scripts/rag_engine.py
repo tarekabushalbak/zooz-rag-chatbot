@@ -31,7 +31,7 @@ def ask_zooz(query):
     start_time = time.time()
     try:
         collection = load_collection()
-        results = collection.query(query_texts=[query], n_results=5)
+        results = collection.query(query_texts=[query], n_results=8)
         documents = results["documents"][0]
         metadatas = results["metadatas"][0]
 
