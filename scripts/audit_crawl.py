@@ -1,10 +1,13 @@
 import json
 import re
 import hashlib
+import os
 from collections import Counter
 from urllib.parse import urlparse
 
 INPUT_FILE = "data/pages.json"
+PDF_INVENTORY_FILE = "data/pdf_urls.json"
+CRAWL_SAFETY_LIMIT = 2500
 
 HEBREW_RE = re.compile(r"[\u0590-\u05FF]")
 LATIN_RE = re.compile(r"[A-Za-z]")
@@ -45,6 +48,17 @@ def path_bucket(url):
     return "/" + "/".join(parts[:2])
 
 
+def load_pdf_count():
+    if not os.path.exists(PDF_INVENTORY_FILE):
+        return 0
+    try:
+        with open(PDF_INVENTORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return len(data) if isinstance(data, list) else 0
+    except Exception:
+        return 0
+
+
 def main():
     with open(INPUT_FILE, "r", encoding="utf-8") as f:
         pages = json.load(f)
@@ -74,6 +88,7 @@ def main():
     avg_len = round(sum(lengths) / len(lengths), 1) if lengths else 0
     min_len = min(lengths) if lengths else 0
     max_len = max(lengths) if lengths else 0
+    pdf_count = load_pdf_count()
 
     print("=" * 80)
     print("ZOOZ CRAWL AUDIT")
@@ -88,6 +103,7 @@ def main():
     print(f"Duplicate content groups:     {duplicate_content_groups}")
     print(f"Possible mojibake pages:      {len(mojibake_pages)}")
     print(f"Text length avg/min/max:      {avg_len} / {min_len} / {max_len}")
+    print(f"Discovered PDF links:         {pdf_count}")
 
     print("\nTop path buckets:")
     for bucket, count in Counter(path_bucket(u) for u in urls if u).most_common(15):
@@ -107,10 +123,13 @@ def main():
     for url in urls[-15:]:
         print(f"  {url}")
 
-    if total >= 600:
-        print("\nWARNING: crawl reached 600 pages exactly.")
-        print("The current MAX_PAGES limit may have truncated the site before all pages were crawled.")
+    if total >= CRAWL_SAFETY_LIMIT:
+        print(f"\nWARNING: crawl reached the safety limit ({CRAWL_SAFETY_LIMIT} pages).")
+        print("The site may have been truncated before all discovered HTML pages were crawled.")
         print("Do NOT rebuild ChromaDB until this is reviewed.")
+    else:
+        print(f"\nOK: crawl stayed below the safety limit ({CRAWL_SAFETY_LIMIT}).")
+        print("If the crawler also reported 'Crawl queue exhausted', discovered HTML coverage is complete.")
 
 
 if __name__ == "__main__":
