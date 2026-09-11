@@ -1,19 +1,32 @@
-import chromadb
+import csv
 import os
 import time
-import csv
 from datetime import datetime
+
+import chromadb
 from dotenv import load_dotenv
 from groq import Groq
+
+try:
+    from scripts.retrieval_utils import get_embedding_function, query_collection
+except ImportError:
+    from retrieval_utils import get_embedding_function, query_collection
 
 load_dotenv()
 
 CHROMA_DIR = "chroma_db"
 COLLECTION_NAME = "zooz_knowledge"
+RETRIEVAL_CANDIDATES = 40
+CONTEXT_CHUNKS = 8
+
 
 def load_collection():
     client = chromadb.PersistentClient(path=CHROMA_DIR)
-    return client.get_collection(name=COLLECTION_NAME)
+    return client.get_collection(
+        name=COLLECTION_NAME,
+        embedding_function=get_embedding_function(),
+    )
+
 
 def log_to_csv(question, answer, duration):
     try:
@@ -23,46 +36,68 @@ def log_to_csv(question, answer, duration):
             writer = csv.writer(f)
             if not file_exists:
                 writer.writerow(["timestamp", "question", "answer", "duration_seconds"])
-            writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), question, answer, duration])
-    except Exception as e:
-        print(f"Log error: {e}")
+            writer.writerow([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                question,
+                answer,
+                duration,
+            ])
+    except Exception as exc:
+        print(f"Log error: {exc}")
+
+
+def build_context(ranked_results):
+    parts = []
+    sources = []
+
+    for index, item in enumerate(ranked_results, start=1):
+        document = item["document"]
+        metadata = item["metadata"]
+        url = metadata.get("url", "")
+        title = metadata.get("title", "")
+
+        parts.append(
+            f"מקור {index}\n"
+            f"כותרת: {title}\n"
+            f"כתובת: {url}\n"
+            f"תוכן: {document}"
+        )
+        if url and url not in sources:
+            sources.append(url)
+
+    return "\n\n---\n\n".join(parts), sources
+
 
 def ask_zooz(query):
     start_time = time.time()
+
     try:
         collection = load_collection()
-        results = collection.query(query_texts=[query], n_results=15)
-        documents = results["documents"][0]
-        metadatas = results["metadatas"][0]
-
-        context = ""
-        sources = []
-        for i, (doc, meta) in enumerate(zip(documents, metadatas)):
-            context += f"מקור {i+1}: {doc}\n"
-            if meta["url"] not in sources:
-                sources.append(meta["url"])
+        ranked = query_collection(
+            collection,
+            query,
+            candidate_k=RETRIEVAL_CANDIDATES,
+            top_k=CONTEXT_CHUNKS,
+        )
+        context, sources = build_context(ranked)
 
         prompt = f"""אתה העוזר הווירטואלי של חברת ZOOZ.
 
-=== איך לענות ===
-המידע בסעיף "מידע מאתר ZOOZ" למטה הוא ההקשר שממנו עליך לענות. אם המידע הנתון עונה - ולו באופן חלקי וסביר - על השאלה, ענה עליה בביטחון ובבירור על סמך אותו מידע. רק אם אחרי בדיקה מדוקדקת של כל הקטעים במידע הנתון, אף אחד מהם לא נוגע בכלל לנושא השאלה - אמור בפירוש "אין לי מידע מדויק על כך" והפנה ל-zooz.co.il או ל-info@zooz.co.il. אם ולו קטע אחד מתוך כל הקטעים שסופקו נוגע ברמה כלשהי לנושא, חובה עליך לענות על סמך אותו קטע, גם אם התשובה תהיה חלקית או כללית. אל תסרב לענות רק כי המידע לא מפורט לחלוטין - תשובה כללית סבירה על סמך ההקשר עדיפה על סירוב מיותר.
+המטרה העליונה שלך היא דיוק. אתה עונה רק על בסיס המידע שמופיע בקטעי המקור שסופקו לך מאתר ZOOZ.
 
-=== דיוק בפרטים ספציפיים - קריטי ===
-כאשר אתה מזכיר עובדה כללית מההקשר (למשל: "יש קשר בין ZOOZ ללקוח מסוים"), אסור לך להוסיף פרטים ספציפיים נוספים - תאריכים, שנים, מספרים, שמות פרויקטים, כמויות - אלא אם הם כתובים מילה-במילה באותו הקשר. אם ההקשר מזכיר לקוח או עובדה בלי תאריך/מספר/שם פרויקט מדויק, ציין את העובדה הכללית בלבד ואל תמציא את הפרט החסר כדי "להשלים" את התשובה. פרט מדויק שגוי (תאריך לא נכון, שם פרויקט מומצא) מזיק הרבה יותר מהיעדר הפרט.
+=== כללי מענה מחייבים ===
+1. ענה בעברית, בצורה קצרה, ברורה ומקצועית.
+2. אל תשתמש בידע כללי, בזיכרון קודם או בהשערות כדי להשלים פרטים שחסרים במקורות.
+3. כאשר השאלה מבקשת עובדה ספציפית — למשל מחיר, שם אדם, תפקיד, לקוח, תאריך, מספר, כתובת, טלפון או שם שירות — מותר לציין אותה רק אם היא מופיעה במפורש במקורות.
+4. אם המקורות קשורים לנושא אבל אינם מכילים את העובדה המדויקת שנשאלה, אמור: "אין לי מידע מדויק על כך במקורות של ZOOZ שברשותי". לאחר מכן אפשר להפנות ל-zooz.co.il או ל-info@zooz.co.il.
+5. אם השאלה מניחה הנחה שאינה נתמכת במקורות, אל תאשר אותה. תקן בעדינות או ציין שאין לכך תמיכה במקורות.
+6. אל תמציא שירותים, מוצרים, לקוחות, מחירים, תפקידים, פרויקטים או נתונים מספריים.
+7. אם יש כמה מקורות רלוונטיים, חבר ביניהם רק כאשר אין ביניהם סתירה.
+8. אם אין במקורות מידע רלוונטי כלל, אמור: "אין לי מידע מדויק על כך" והפנה לאתר ZOOZ או ל-info@zooz.co.il.
+9. אל תענה על נושאים שאינם קשורים ל-ZOOZ. במקרה כזה אמור: "אני יכול לעזור רק בנושאים הקשורים ל-ZOOZ."
+10. אל תזכיר למשתמש ציוני retrieval, מרחקים וקטוריים או פרטים טכניים פנימיים של המערכת.
 
-=== חוקים מחייבים ===
-1. ענה תמיד בעברית בלבד, גם אם שאלו באנגלית.
-2. כשהמשתמש כותב "החברה" או "הכוונה" — הכוונה תמיד ל-ZOOZ.
-3. אל תמציא פרטים שלא מופיעים במידע הנתון ולא ניתן להסיק אותם ממנו: שמות שירותים, שמות לקוחות, פרסים או הכרות, נתונים מספריים (כמו גודל צוות, משך פרויקט, מיקום משרדים).
-4. פרטי יצירת קשר (טלפון, כתובת פיזית, פקס) - ציין אותם רק אם הם מופיעים במפורש ובאופן מדויק במידע הנתון. אם לא - הפנה רק למייל info@zooz.co.il ולאתר zooz.co.il, ואל תמציא או תנחש מספר טלפון או כתובת.
-5. צוות ZOOZ הידוע: ארי מנור הוא המנכ"ל ומייסד החברה. טארק אבו שלבק הוא חלק מהצוות. אל תוסיף עליהם תפקידים, תארים או פרטים שלא מופיעים במידע הנתון.
-6. תמצית ולא מלל מיותר: ענה בצורה ממוקדת וברורה, אל תחזור על אותם משפטים כדי להאריך את התשובה.
-
-=== נושאים שאינם קשורים ל-ZOOZ ===
-רק לשאלות שאין להן שום קשר ל-ZOOZ (מזג אוויר, פוליטיקה, ספורט, בידור, אנשים שאינם מ-ZOOZ) — ענה:
-"אני יכול לעזור רק בנושאים הקשורים ל-ZOOZ. לשאלות נוספות בקר ב-zooz.co.il"
-
-=== מידע מאתר ZOOZ ===
+=== מקורות מאתר ZOOZ ===
 {context}
 
 === שאלת המשתמש ===
@@ -74,29 +109,36 @@ def ask_zooz(query):
         response = client.chat.completions.create(
             model="openai/gpt-oss-20b",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=800
+            temperature=0.1,
+            max_tokens=600,
         )
-        answer = response.choices[0].message.content
+
+        answer = (response.choices[0].message.content or "").strip()
+        if not answer:
+            answer = (
+                "לא התקבלה תשובה מהמודל. אנא נסה שוב או פנה ל-info@zooz.co.il"
+            )
+
         duration = round(time.time() - start_time, 2)
         log_to_csv(query, answer, duration)
         return answer, sources
 
-    except Exception as e:
+    except Exception as exc:
         duration = round(time.time() - start_time, 2)
-        print(f"CHATBOT ERROR: {repr(e)}")
-        error_msg = f"אירעה שגיאה טכנית. אנא נסה שוב או פנה ל-info@zooz.co.il"
-        log_to_csv(query, f"ERROR: {e}", duration)
+        print(f"CHATBOT ERROR: {repr(exc)}")
+        error_msg = "אירעה שגיאה טכנית. אנא נסה שוב או פנה ל-info@zooz.co.il"
+        log_to_csv(query, f"ERROR: {exc}", duration)
         return error_msg, []
+
 
 if __name__ == "__main__":
     print("ZOOZ Chatbot - type 'exit' to quit")
     while True:
-        q = input("Question: ").strip()
-        if q == "exit":
+        question = input("Question: ").strip()
+        if question == "exit":
             break
-        if q:
-            answer, sources = ask_zooz(q)
+        if question:
+            answer, sources = ask_zooz(question)
             print(answer)
             print("Sources:")
             for url in sources:
