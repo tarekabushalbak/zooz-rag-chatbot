@@ -5,12 +5,16 @@ import chromadb
 try:
     from scripts.retrieval_utils import (
         EMBEDDING_MODEL,
+        classify_query,
+        expand_query,
         get_embedding_function,
         query_collection,
     )
 except ImportError:
     from retrieval_utils import (
         EMBEDDING_MODEL,
+        classify_query,
+        expand_query,
         get_embedding_function,
         query_collection,
     )
@@ -41,6 +45,8 @@ def load_collection():
 
 
 def evaluate_question(collection, question, top_k, candidate_k):
+    intent = classify_query(question)
+    expanded = expand_query(question, intent)
     ranked = query_collection(
         collection,
         question,
@@ -50,6 +56,9 @@ def evaluate_question(collection, question, top_k, candidate_k):
 
     print("\n" + "=" * 100)
     print(f"QUESTION: {question}")
+    print(f"INTENT:   {intent}")
+    if expanded != question:
+        print(f"SEARCH:   {expanded}")
     print("=" * 100)
 
     for rank, item in enumerate(ranked, start=1):
@@ -64,6 +73,7 @@ def evaluate_question(collection, question, top_k, candidate_k):
             f"\n#{rank} | rerank={item['score']:.4f} "
             f"| distance={item['distance']:.4f} "
             f"| lexical={item['lexical_overlap']:.2f} "
+            f"| url_boost={item.get('url_adjustment', 0.0):+.2f} "
             f"| lang={language} | chunk={chunk_index}"
         )
         print(f"TITLE: {title}")
@@ -73,7 +83,7 @@ def evaluate_question(collection, question, top_k, candidate_k):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Inspect multilingual + reranked retrieval quality for ZOOZ."
+        description="Inspect multilingual + intent-aware retrieval quality for ZOOZ."
     )
     parser.add_argument(
         "question",
@@ -81,7 +91,7 @@ def main():
         help="Optional custom question. If omitted, the ZOOZ smoke-test set is used.",
     )
     parser.add_argument("--top-k", type=int, default=5)
-    parser.add_argument("--candidate-k", type=int, default=40)
+    parser.add_argument("--candidate-k", type=int, default=80)
     args = parser.parse_args()
 
     questions = [" ".join(args.question)] if args.question else DEFAULT_QUESTIONS
