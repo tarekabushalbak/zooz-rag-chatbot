@@ -29,6 +29,7 @@ COLLECTION_NAME = "zooz_knowledge"
 RETRIEVAL_CANDIDATES = 80
 CONTEXT_CHUNKS = 8
 CONTACT_URL = "https://www.zooz.co.il/contact.shtml"
+MODEL = "openai/gpt-oss-20b"
 
 
 def load_collection():
@@ -166,17 +167,23 @@ def ask_zooz(query):
 
 === תשובה ==="""
 
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY is missing")
+
+        client = Groq(api_key=api_key)
         response = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
+            model=MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=600,
+            max_tokens=800,
+            reasoning_effort="low",
+            include_reasoning=False,
         )
 
         answer = (response.choices[0].message.content or "").strip()
         if not answer:
-            answer = "לא התקבלה תשובה מהמודל. אנא נסה שוב או פנה ל-info@zooz.co.il"
+            raise RuntimeError("Groq returned empty answer content")
 
         duration = round(time.time() - start_time, 2)
         log_to_csv(query, answer, duration)
