@@ -1,6 +1,7 @@
 import hashlib
 import re
 from collections import defaultdict
+from functools import lru_cache
 from urllib.parse import urlparse
 
 from chromadb.utils import embedding_functions
@@ -23,7 +24,14 @@ DOMAIN_TERMS = {
 }
 
 
+@lru_cache(maxsize=1)
 def get_embedding_function():
+    """Create the multilingual embedding model once per process.
+
+    Loading SentenceTransformer for every question was the main local latency source.
+    Reusing one instance keeps the embedding model warm across regression tests and
+    chatbot requests.
+    """
     return embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name=EMBEDDING_MODEL
     )
@@ -49,11 +57,7 @@ def tokens(text):
 
 
 def _hebrew_variants(token):
-    """Return conservative lexical variants for Hebrew prefixes/plural endings.
-
-    This is used only for reranking, never to alter the text sent to the embedding
-    model. It helps forms such as שירותים/שירותי and השיווק/שיווק match each other.
-    """
+    """Return conservative lexical variants for Hebrew prefixes/plural endings."""
     variants = {token}
     if not HEBREW_RE.search(token):
         return variants
@@ -101,20 +105,42 @@ def classify_query(query):
     q = normalize(query).lower()
     q_tokens = set(tokens(q))
 
+    # Obvious non-ZOOZ requests should never be sent into retrieval where an old
+    # newsletter can accidentally contain a matching word and tempt the LLM to answer.
+    if any(term in q for term in [
+        "מזג האוויר", "תחזית מזג", "מי ניצח", "משחק אתמול", "תספר לי בדיחה",
+        "ספר לי בדיחה", "פוליטיקה", "מה דעתך על פוליט",
+    ]):
+        return "out_of_scope"
+
     if any(term in q for term in ["כמה עולה", "כמה עולים", "מה המחיר", "מחיר", "עלות", "תמחור"]):
         return "pricing"
-    if any(term in q for term in ["יצירת קשר", "ליצור קשר", "טלפון", "אימייל", "אי-מייל", "מייל", "כתובת"]):
+
+    if any(term in q for term in [
+        "יצירת קשר", "ליצור קשר", "טלפון", "אימייל", "אי-מייל", "מייל", "כתובת",
+        "איך מדברים איתכם", "איך מדברים אתכם", "לדבר איתכם", "לדבר אתכם",
+        "לפנות אליכם", "איך פונים", "איפה פונים",
+    ]):
         return "contact"
-    if "ארי מנור" in q or "צוות" in q or "מנכ\"ל" in q or "מנכל" in q:
+
+    if "ארי מנור" in q or "צוות" in q or "מנכ\"ל" in q or "מנכל" in q or q.strip() == "מי ארי?":
         return "team"
+
     if "לקוח" in q or "לקוחות" in q:
         return "clients"
+
     if any(term in q for term in ["סדנה", "סדנא", "סדנאות", "הרצאה", "הרצאות"]):
         return "workshops"
+
     if "פיתוח מנהלים" in q:
         return "management_development"
+
+    if "triz" in q:
+        return "triz"
+
     if "חדשנות שיטתית" in q:
         return "systematic_innovation"
+
     if "שיווק" in q:
         return "marketing"
 
@@ -122,6 +148,10 @@ def classify_query(query):
         "שירות", "שרות", "מציעה", "מציע", "מספקת", "מספק", "יכולה לעשות",
         "יכול לעשות", "מה עושה", "במה עוסקת", "במה עוסק",
     ])
+    zooz_named = "zooz" in q or "זוז" in q
+    if zooz_named and any(term in q for term in ["עושה", "עושים", "עוסקת", "עוסק"]):
+        service_words = True
+
     if service_words and not (q_tokens & DOMAIN_TERMS):
         return "services_overview"
     if service_words:
@@ -140,6 +170,7 @@ def expand_query(query, intent=None):
         "workshops": "סדנאות הדרכות ZOOZ",
         "management_development": "פיתוח מנהלים הדרכה ZOOZ",
         "systematic_innovation": "חדשנות שיטתית שיטות ניהול חדשנות ZOOZ",
+        "triz": "TRIZ I-TRIZ Ideation חדשנות ZOOZ",
         "marketing": "שיווק ייעוץ שיווקי אסטרטגיה ZOOZ",
     }
     suffix = additions.get(intent, "")
@@ -156,8 +187,6 @@ def _intent_url_adjustment(intent, url, title, query):
     q = normalize(query).lower()
     score = 0.0
 
-    # Small global authority preference for canonical company pages over old
-    # newsletters/articles when the question is not explicitly asking for one.
     if "/lazooz/" in path and "עלון" not in q:
         score -= 0.08
     if "_article" in path and "מאמר" not in q:
@@ -191,7 +220,9 @@ def _intent_url_adjustment(intent, url, title, query):
 
     elif intent == "clients":
         if "news_clients" in path or "about_clients" in path or "clients" in path:
-            score += 0.45
+            score += 0.65
+        if "personel" in path or "_article" in path:
+            score -= 0.18
 
     elif intent == "workshops":
         if "workshop" in path or "training" in path:
@@ -207,6 +238,14 @@ def _intent_url_adjustment(intent, url, title, query):
         elif "innovation" in path:
             score += 0.18
 
+    elif intent == "triz":
+        if path == "/marketing_article14.shtml":
+            score += 0.72
+        elif "innovation-methods" in path:
+            score += 0.58
+        elif "triz" in path or "innovation" in path:
+            score += 0.20
+
     elif intent == "marketing":
         if "marketing_services" in path or "1-marketing" in path:
             score += 0.34
@@ -214,8 +253,6 @@ def _intent_url_adjustment(intent, url, title, query):
             score += 0.12
 
     elif intent == "pricing":
-        # Old articles/newsletters contain many incidental dollar amounts. They
-        # should not outrank an actual service/pricing page for a current quote.
         if "/lazooz/" in path or "_article" in path or "/news" in path:
             score -= 0.35
         if "price" in path or "pricing" in path or "מחיר" in title_l or "תמחור" in title_l:
