@@ -119,14 +119,21 @@ def classify_query(query):
     if any(term in q for term in [
         "יצירת קשר", "ליצור קשר", "טלפון", "אימייל", "אי-מייל", "מייל", "כתובת",
         "איך מדברים איתכם", "איך מדברים אתכם", "לדבר איתכם", "לדבר אתכם",
-        "לפנות אליכם", "איך פונים", "איפה פונים",
+        "לפנות אליכם", "איך פונים", "איפה פונים", "איפה אפשר לפנות", "אפשר לפנות",
     ]):
         return "contact"
 
     if "ארי מנור" in q or "צוות" in q or "מנכ\"ל" in q or "מנכל" in q or q.strip() == "מי ארי?":
         return "team"
 
-    if "לקוח" in q or "לקוחות" in q:
+    if (
+        "לקוח" in q
+        or "לקוחות" in q
+        or any(term in q for term in [
+            "עבדה עם", "עובדת עם", "עבדו עם", "עובדים עם",
+            "ארגונים גדולים", "ארגון גדול", "חברות גדולות", "חברה גדולה",
+        ])
+    ):
         return "clients"
 
     if any(term in q for term in ["סדנה", "סדנא", "סדנאות", "הרצאה", "הרצאות"]):
@@ -138,7 +145,7 @@ def classify_query(query):
     if "triz" in q:
         return "triz"
 
-    if "חדשנות שיטתית" in q:
+    if any(term in q for term in ["חדשנות שיטתית", "שיטות חדשנות", "שיטות לחדשנות", "שיטות של חדשנות"]):
         return "systematic_innovation"
 
     if "שיווק" in q:
