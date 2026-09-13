@@ -11,12 +11,14 @@ from groq import Groq
 
 try:
     from scripts.retrieval_utils import (
+        classify_query,
         get_embedding_function,
         is_pricing_query,
         query_collection,
     )
 except ImportError:
     from retrieval_utils import (
+        classify_query,
         get_embedding_function,
         is_pricing_query,
         query_collection,
@@ -56,6 +58,91 @@ def log_to_csv(question, answer, duration):
             ])
     except Exception as exc:
         print(f"Log error: {exc}")
+
+
+def _item_path(item):
+    url = (item.get("metadata") or {}).get("url", "")
+    return urlparse(url).path.lower()
+
+
+def _contains_person_name(item, name="ארי מנור"):
+    metadata = item.get("metadata") or {}
+    haystack = f"{metadata.get('title', '')} {item.get('document', '')}"
+    return name in haystack
+
+
+def curate_results_for_answer(ranked_results, query):
+    """Reduce noisy legacy context for intents where canonical pages exist.
+
+    Retrieval remains broad for recall. Before sending context to the LLM, we make
+    canonical company pages dominant for overview/team/contact questions so old
+    newsletters and incidental mentions cannot overwhelm a direct answer.
+    """
+    if not ranked_results:
+        return []
+
+    intent = classify_query(query)
+
+    if intent == "contact":
+        contact = [item for item in ranked_results if _item_path(item) == "/contact.shtml"]
+        return contact[:1] if contact else ranked_results[:3]
+
+    if intent == "team":
+        canonical = [item for item in ranked_results if _item_path(item) == "/about_team.shtml"]
+        direct = [
+            item for item in ranked_results
+            if _contains_person_name(item) and _item_path(item) != "/about_team.shtml"
+        ]
+        selected = canonical + direct
+        if not selected:
+            selected = ranked_results
+        # Keep the person answer focused. Four direct sources are more useful than
+        # eight mixed mentions from newsletters, client news or unrelated articles.
+        return selected[:4]
+
+    if intent == "services_overview":
+        preferred_paths = [
+            "/about_profile.shtml",
+            "/about.shtml",
+            "/personel.shtml",
+        ]
+        preferred = []
+        for path in preferred_paths:
+            preferred.extend(item for item in ranked_results if _item_path(item) == path)
+        service_pages = [
+            item for item in ranked_results
+            if item not in preferred
+            and (
+                "services" in _item_path(item)
+                or "personel" in _item_path(item)
+                or "marketing" in _item_path(item)
+            )
+        ]
+        selected = preferred + service_pages
+        return (selected or ranked_results)[:5]
+
+    return ranked_results
+
+
+def response_guidance(query):
+    intent = classify_query(query)
+    if intent == "team":
+        return (
+            "השאלה היא על אדם/צוות. פתח בתפקיד הנוכחי שלו ב-ZOOZ. "
+            "ענה ב-2 עד 4 משפטים בלבד. אל תעמיס רשימת לקוחות, פרויקטים או חברות עבר "
+            "אלא אם המשתמש ביקש במפורש ביוגרפיה מפורטת."
+        )
+    if intent == "services_overview":
+        return (
+            "השאלה היא על שירותי החברה באופן כללי. הסתמך בראש ובראשונה על דף פרופיל החברה/אודות. "
+            "סכם את תחומי-העל בלבד: אסטרטגיה, שיווק וחדשנות; וכן ייעוץ ופיתוח ארגוני, "
+            "אימון עסקי ופיתוח מנהלים ועובדים. אל תהפוך דוגמאות נקודתיות או כלי CRM לשירות-על."
+        )
+    if intent == "contact":
+        return "השאלה היא על יצירת קשר. תן רק את פרטי הקשר שמופיעים במקור הישיר, בלי הרחבות."
+    if intent == "clients":
+        return "אם נותנים דוגמאות ללקוחות, ציין רק שמות שמופיעים במפורש במקורות שסופקו."
+    return "ענה ישירות לשאלה ואל תוסיף פרטים שאינם נחוצים למענה."
 
 
 def build_context(ranked_results):
@@ -128,7 +215,6 @@ def ask_zooz(query):
             candidate_k=RETRIEVAL_CANDIDATES,
             top_k=CONTEXT_CHUNKS,
         )
-        context, sources = build_context(ranked)
 
         # Price questions are intentionally conservative. If no explicit current
         # pricing source exists, do not expose incidental amounts from old content.
@@ -140,6 +226,10 @@ def ask_zooz(query):
             duration = round(time.time() - start_time, 2)
             log_to_csv(query, answer, duration)
             return answer, [CONTACT_URL]
+
+        curated_ranked = curate_results_for_answer(ranked, query)
+        context, sources = build_context(curated_ranked)
+        guidance = response_guidance(query)
 
         prompt = f"""אתה העוזר הווירטואלי של חברת ZOOZ.
 
@@ -158,6 +248,10 @@ def ask_zooz(query):
 10. אל תזכיר למשתמש ציוני retrieval, מרחקים וקטוריים או פרטים טכניים פנימיים של המערכת.
 11. בשאלות על מחיר או עלות של שירותי ZOOZ, מחיר שמופיע במאמר, בעלון, בדוגמת לקוח או בפרויקט ישן אינו מחירון של שירותי ZOOZ. אל תציג אותו כמחיר שירות.
 12. העדף מידע מדפי אודות, שירותים, צוות, יצירת קשר ועמודי תחום על פני אזכורים מקריים במאמרים ישנים, כאשר הם עונים ישירות על השאלה.
+13. אל תוסיף רשימות ארוכות של עובדות צדדיות רק מפני שהן מופיעות במקורות; ענה למה שנשאל.
+
+=== מיקוד מיוחד לשאלה הנוכחית ===
+{guidance}
 
 === מקורות מאתר ZOOZ ===
 {context}
