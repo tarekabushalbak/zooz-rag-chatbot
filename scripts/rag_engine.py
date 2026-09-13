@@ -1,22 +1,32 @@
 import csv
 import os
+import re
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 
 import chromadb
 from dotenv import load_dotenv
 from groq import Groq
 
 try:
-    from scripts.retrieval_utils import get_embedding_function, query_collection
+    from scripts.retrieval_utils import (
+        get_embedding_function,
+        is_pricing_query,
+        query_collection,
+    )
 except ImportError:
-    from retrieval_utils import get_embedding_function, query_collection
+    from retrieval_utils import (
+        get_embedding_function,
+        is_pricing_query,
+        query_collection,
+    )
 
 load_dotenv()
 
 CHROMA_DIR = "chroma_db"
 COLLECTION_NAME = "zooz_knowledge"
-RETRIEVAL_CANDIDATES = 40
+RETRIEVAL_CANDIDATES = 80
 CONTEXT_CHUNKS = 8
 
 
@@ -68,6 +78,31 @@ def build_context(ranked_results):
     return "\n\n---\n\n".join(parts), sources
 
 
+def has_current_pricing_evidence(ranked_results):
+    """Accept pricing only from a service-like page, not incidental old article prices."""
+    price_terms = ("מחיר", "עלות", "תמחור", "עולה", "עולים", "₪", "ש\"ח")
+    service_terms = ("שירות", "שרות", "סדנה", "סדנא", "ייעוץ", "הדרכה")
+
+    for item in ranked_results:
+        metadata = item.get("metadata", {})
+        url = metadata.get("url", "")
+        title = metadata.get("title", "")
+        document = item.get("document", "")
+        path = urlparse(url).path.lower()
+        combined = f"{title} {document}".lower()
+
+        if "/lazooz/" in path or "_article" in path or "/news" in path:
+            continue
+
+        if any(term in combined for term in price_terms) and any(
+            term in combined for term in service_terms
+        ):
+            if re.search(r"\d", combined):
+                return True
+
+    return False
+
+
 def ask_zooz(query):
     start_time = time.time()
 
@@ -80,6 +115,15 @@ def ask_zooz(query):
             top_k=CONTEXT_CHUNKS,
         )
         context, sources = build_context(ranked)
+
+        if is_pricing_query(query) and not has_current_pricing_evidence(ranked):
+            answer = (
+                "אין לי במקורות של ZOOZ מחיר מדויק ועדכני לשירות שנשאל. "
+                "לקבלת הצעת מחיר מומלץ לפנות ל-ZOOZ דרך info@zooz.co.il או דרך אתר החברה."
+            )
+            duration = round(time.time() - start_time, 2)
+            log_to_csv(query, answer, duration)
+            return answer, sources[:2]
 
         prompt = f"""אתה העוזר הווירטואלי של חברת ZOOZ.
 
@@ -96,6 +140,8 @@ def ask_zooz(query):
 8. אם אין במקורות מידע רלוונטי כלל, אמור: "אין לי מידע מדויק על כך" והפנה לאתר ZOOZ או ל-info@zooz.co.il.
 9. אל תענה על נושאים שאינם קשורים ל-ZOOZ. במקרה כזה אמור: "אני יכול לעזור רק בנושאים הקשורים ל-ZOOZ."
 10. אל תזכיר למשתמש ציוני retrieval, מרחקים וקטוריים או פרטים טכניים פנימיים של המערכת.
+11. בשאלות על מחיר או עלות של שירותי ZOOZ, מחיר שמופיע במאמר, בעלון, בדוגמת לקוח או בפרויקט ישן אינו מחירון של שירותי ZOOZ. אל תציג אותו כמחיר שירות.
+12. העדף מידע מדפי אודות, שירותים, צוות, יצירת קשר ועמודי תחום על פני אזכורים מקריים במאמרים ישנים, כאשר הם עונים ישירות על השאלה.
 
 === מקורות מאתר ZOOZ ===
 {context}
@@ -115,9 +161,7 @@ def ask_zooz(query):
 
         answer = (response.choices[0].message.content or "").strip()
         if not answer:
-            answer = (
-                "לא התקבלה תשובה מהמודל. אנא נסה שוב או פנה ל-info@zooz.co.il"
-            )
+            answer = "לא התקבלה תשובה מהמודל. אנא נסה שוב או פנה ל-info@zooz.co.il"
 
         duration = round(time.time() - start_time, 2)
         log_to_csv(query, answer, duration)
