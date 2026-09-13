@@ -28,6 +28,7 @@ CHROMA_DIR = "chroma_db"
 COLLECTION_NAME = "zooz_knowledge"
 RETRIEVAL_CANDIDATES = 80
 CONTEXT_CHUNKS = 8
+CONTACT_URL = "https://www.zooz.co.il/contact.shtml"
 
 
 def load_collection():
@@ -79,9 +80,15 @@ def build_context(ranked_results):
 
 
 def has_current_pricing_evidence(ranked_results):
-    """Accept pricing only from a service-like page, not incidental old article prices."""
-    price_terms = ("מחיר", "עלות", "תמחור", "עולה", "עולים", "₪", "ש\"ח")
-    service_terms = ("שירות", "שרות", "סדנה", "סדנא", "ייעוץ", "הדרכה")
+    """Accept a quoted ZOOZ service price only from an explicit pricing source.
+
+    The legacy site contains many incidental numbers and prices inside old articles,
+    newsletters and project examples. Those are never treated as a current service
+    price. To avoid false positives, a source must look explicitly like a pricing
+    page/title and contain a concrete amount/currency marker.
+    """
+    explicit_price_terms = ("מחיר", "מחירים", "תמחור", "pricing", "price")
+    currency_or_amount = re.compile(r"(?:₪|ש\"ח|שח|\$|€|\b\d+[\d,.]*\b)")
 
     for item in ranked_results:
         metadata = item.get("metadata", {})
@@ -89,16 +96,22 @@ def has_current_pricing_evidence(ranked_results):
         title = metadata.get("title", "")
         document = item.get("document", "")
         path = urlparse(url).path.lower()
+        title_l = title.lower()
         combined = f"{title} {document}".lower()
 
         if "/lazooz/" in path or "_article" in path or "/news" in path:
             continue
 
-        if any(term in combined for term in price_terms) and any(
-            term in combined for term in service_terms
-        ):
-            if re.search(r"\d", combined):
-                return True
+        explicit_source = (
+            "price" in path
+            or "pricing" in path
+            or any(term in title_l for term in explicit_price_terms)
+        )
+        if not explicit_source:
+            continue
+
+        if any(term in combined for term in explicit_price_terms) and currency_or_amount.search(combined):
+            return True
 
     return False
 
@@ -116,6 +129,8 @@ def ask_zooz(query):
         )
         context, sources = build_context(ranked)
 
+        # Price questions are intentionally conservative. If no explicit current
+        # pricing source exists, do not expose incidental amounts from old content.
         if is_pricing_query(query) and not has_current_pricing_evidence(ranked):
             answer = (
                 "אין לי במקורות של ZOOZ מחיר מדויק ועדכני לשירות שנשאל. "
@@ -123,7 +138,7 @@ def ask_zooz(query):
             )
             duration = round(time.time() - start_time, 2)
             log_to_csv(query, answer, duration)
-            return answer, sources[:2]
+            return answer, [CONTACT_URL]
 
         prompt = f"""אתה העוזר הווירטואלי של חברת ZOOZ.
 
