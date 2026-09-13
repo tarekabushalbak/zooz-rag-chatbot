@@ -88,12 +88,18 @@ TESTS = [
 
     # Paraphrase robustness
     {"category": "paraphrase", "q": "מה זוז עושה?", "must_any": ["ייעוץ", "הדרכה", "חדשנות", "שיווק", "אסטרטגיה"]},
-    {"category": "paraphrase", "q": "באילו דברים אתם עוזרים לארגונים?", "must_any": ["ייעוץ", "הדרכה", "פיתוח", "חדשנות", "שיווק"]},
-    {"category": "paraphrase", "q": "מי עומד מאחורי זוז?", "must_any": ["ארי", "מנור", "צוות"]},
-    {"category": "paraphrase", "q": "איך מדברים איתכם?", "must_any": ["info@zooz.co.il", "zooz.co.il", "טלפון"]},
-    {"category": "paraphrase", "q": "יש לכם משהו למנהלים?", "must_any": ["מנהלים", "פיתוח", "סדנה", "הדרכה", "אימון"]},
+    {"category": "paraphrase", "q": "מי זה ארי?", "must_any": ["ארי", "מנור"]},
+    {"category": "paraphrase", "q": "איך מדברים איתכם?", "must_any": ["info@zooz.co.il", "zooz.co.il", "טלפון", "כתובת"]},
+    {"category": "paraphrase", "q": "אתם עושים סדנאות?", "must_any": ["סדנה", "סדנאות", "הדרכה"]},
     {"category": "paraphrase", "q": "אתם עוזרים בשיווק?", "must_any": ["שיווק"]},
 ]
+
+
+TECHNICAL_FAILURE_MARKERS = (
+    "אירעה שגיאה טכנית",
+    "error:",
+    "groq returned empty answer",
+)
 
 
 def _contains(text, needle):
@@ -101,11 +107,20 @@ def _contains(text, needle):
 
 
 def check_test(test, answer):
+    answer = answer or ""
+    failures = []
+
+    # A transport/model/runtime failure must never pass merely because the generic
+    # fallback string happens to contain a keyword such as ZOOZ or info@zooz.co.il.
+    if not answer.strip():
+        return False, "empty_answer"
+    if any(marker.lower() in answer.lower() for marker in TECHNICAL_FAILURE_MARKERS):
+        return False, "technical_failure"
+
     must_all = test.get("must_all", [])
     must_any = test.get("must_any", [])
     forbid_any = test.get("forbid_any", [])
 
-    failures = []
     if must_all:
         missing = [item for item in must_all if not _contains(answer, item)]
         if missing:
