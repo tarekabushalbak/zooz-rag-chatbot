@@ -3,6 +3,7 @@ import os
 import re
 import time
 from datetime import datetime
+from functools import lru_cache
 from urllib.parse import urlparse
 
 import chromadb
@@ -31,10 +32,14 @@ COLLECTION_NAME = "zooz_knowledge"
 RETRIEVAL_CANDIDATES = 80
 CONTEXT_CHUNKS = 8
 CONTACT_URL = "https://www.zooz.co.il/contact.shtml"
+CONTACT_EMAIL = "info@zooz.co.il"
+CONTACT_PHONE = "09-9585085"
 MODEL = "openai/gpt-oss-20b"
 
 
+@lru_cache(maxsize=1)
 def load_collection():
+    """Load Chroma and the embedding model once per process."""
     client = chromadb.PersistentClient(path=CHROMA_DIR)
     return client.get_collection(
         name=COLLECTION_NAME,
@@ -72,12 +77,7 @@ def _contains_person_name(item, name="ארי מנור"):
 
 
 def curate_results_for_answer(ranked_results, query):
-    """Reduce noisy legacy context for intents where canonical pages exist.
-
-    Retrieval remains broad for recall. Before sending context to the LLM, we make
-    canonical company pages dominant for overview/team/contact questions so old
-    newsletters and incidental mentions cannot overwhelm a direct answer.
-    """
+    """Prefer authoritative ZOOZ pages for intents where noisy legacy content exists."""
     if not ranked_results:
         return []
 
@@ -94,11 +94,7 @@ def curate_results_for_answer(ranked_results, query):
             if _contains_person_name(item) and _item_path(item) != "/about_team.shtml"
         ]
         selected = canonical + direct
-        if not selected:
-            selected = ranked_results
-        # Keep the person answer focused. Four direct sources are more useful than
-        # eight mixed mentions from newsletters, client news or unrelated articles.
-        return selected[:4]
+        return (selected or ranked_results)[:4]
 
     if intent == "services_overview":
         preferred_paths = [
@@ -121,27 +117,55 @@ def curate_results_for_answer(ranked_results, query):
         selected = preferred + service_pages
         return (selected or ranked_results)[:5]
 
+    if intent == "clients":
+        direct_client_pages = [
+            item for item in ranked_results
+            if any(marker in _item_path(item) for marker in ["news_clients", "about_clients", "clients"])
+        ]
+        return (direct_client_pages or ranked_results)[:5]
+
+    if intent == "triz":
+        direct = [
+            item for item in ranked_results
+            if _item_path(item) in {"/marketing_article14.shtml", "/2-innovation-methods.shtml"}
+        ]
+        return (direct or ranked_results)[:4]
+
     return ranked_results
 
 
 def response_guidance(query):
     intent = classify_query(query)
+
     if intent == "team":
         return (
             "השאלה היא על אדם/צוות. פתח בתפקיד הנוכחי שלו ב-ZOOZ. "
             "ענה ב-2 עד 4 משפטים בלבד. אל תעמיס רשימת לקוחות, פרויקטים או חברות עבר "
             "אלא אם המשתמש ביקש במפורש ביוגרפיה מפורטת."
         )
+
     if intent == "services_overview":
         return (
             "השאלה היא על שירותי החברה באופן כללי. הסתמך בראש ובראשונה על דף פרופיל החברה/אודות. "
             "סכם את תחומי-העל בלבד: אסטרטגיה, שיווק וחדשנות; וכן ייעוץ ופיתוח ארגוני, "
             "אימון עסקי ופיתוח מנהלים ועובדים. אל תהפוך דוגמאות נקודתיות או כלי CRM לשירות-על."
         )
+
     if intent == "contact":
         return "השאלה היא על יצירת קשר. תן רק את פרטי הקשר שמופיעים במקור הישיר, בלי הרחבות."
+
     if intent == "clients":
-        return "אם נותנים דוגמאות ללקוחות, ציין רק שמות שמופיעים במפורש במקורות שסופקו."
+        return (
+            "השאלה היא על לקוחות. השתמש רק בעמודי לקוחות/פרויקטים ישירים. "
+            "אל תציג כחלק מלקוחות ZOOZ חברות שמופיעות רק ברקע התעסוקתי של יועץ או עובד."
+        )
+
+    if intent == "triz":
+        return (
+            "השאלה היא על TRIZ. אל תטען ש-ZOOZ פיתחה את TRIZ או את I-TRIZ אלא אם המקור אומר זאת במפורש. "
+            "הפרד בין המתודולוגיה עצמה לבין האופן שבו ZOOZ עבדה עם מומחי/פתרונות TRIZ או ייצגה גורם חיצוני."
+        )
+
     return "ענה ישירות לשאלה ואל תוסיף פרטים שאינם נחוצים למענה."
 
 
@@ -168,13 +192,7 @@ def build_context(ranked_results):
 
 
 def has_current_pricing_evidence(ranked_results):
-    """Accept a quoted ZOOZ service price only from an explicit pricing source.
-
-    The legacy site contains many incidental numbers and prices inside old articles,
-    newsletters and project examples. Those are never treated as a current service
-    price. To avoid false positives, a source must look explicitly like a pricing
-    page/title and contain a concrete amount/currency marker.
-    """
+    """Accept a quoted ZOOZ service price only from an explicit pricing source."""
     explicit_price_terms = ("מחיר", "מחירים", "תמחור", "pricing", "price")
     currency_or_amount = re.compile(r"(?:₪|ש\"ח|שח|\$|€|\b\d+[\d,.]*\b)")
 
@@ -208,6 +226,28 @@ def ask_zooz(query):
     start_time = time.time()
 
     try:
+        intent = classify_query(query)
+
+        # Keep obvious non-ZOOZ requests out of retrieval entirely. This prevents
+        # old newsletters from accidentally supplying a plausible but irrelevant answer.
+        if intent == "out_of_scope":
+            answer = "אני יכול לעזור רק בנושאים הקשורים ל-ZOOZ."
+            duration = round(time.time() - start_time, 2)
+            log_to_csv(query, answer, duration)
+            return answer, []
+
+        # The crawler masks email addresses on the legacy contact page. These are
+        # canonical company contact details, so answer common contact questions
+        # deterministically and keep the contact page as the single source.
+        if intent == "contact" and "כתובת" not in query:
+            answer = (
+                f"אפשר ליצור קשר עם ZOOZ בטלפון {CONTACT_PHONE} או במייל {CONTACT_EMAIL}. "
+                "פרטים נוספים מופיעים בדף יצירת הקשר של החברה."
+            )
+            duration = round(time.time() - start_time, 2)
+            log_to_csv(query, answer, duration)
+            return answer, [CONTACT_URL]
+
         collection = load_collection()
         ranked = query_collection(
             collection,
@@ -216,8 +256,6 @@ def ask_zooz(query):
             top_k=CONTEXT_CHUNKS,
         )
 
-        # Price questions are intentionally conservative. If no explicit current
-        # pricing source exists, do not expose incidental amounts from old content.
         if is_pricing_query(query) and not has_current_pricing_evidence(ranked):
             answer = (
                 "אין לי במקורות של ZOOZ מחיר מדויק ועדכני לשירות שנשאל. "
