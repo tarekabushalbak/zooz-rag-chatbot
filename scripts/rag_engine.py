@@ -1,19 +1,60 @@
-import chromadb
-import os
-import time
 import csv
+import os
+import re
+import time
 from datetime import datetime
+from functools import lru_cache
+from urllib.parse import urlparse
+
+import chromadb
 from dotenv import load_dotenv
 from groq import Groq
+
+try:
+    from scripts.retrieval_utils import (
+        classify_query,
+        get_embedding_function,
+        is_pricing_query,
+        query_collection,
+    )
+except ImportError:
+    from retrieval_utils import (
+        classify_query,
+        get_embedding_function,
+        is_pricing_query,
+        query_collection,
+    )
 
 load_dotenv()
 
 CHROMA_DIR = "chroma_db"
 COLLECTION_NAME = "zooz_knowledge"
+RETRIEVAL_CANDIDATES = 80
+CONTEXT_CHUNKS = 6
+MAX_CONTEXT_CHARS = 1400
+CONTACT_URL = "https://www.zooz.co.il/contact.shtml"
+CONTACT_EMAIL = "info@zooz.co.il"
+CONTACT_PHONE = "09-9585085"
+MODEL = "openai/gpt-oss-20b"
 
+
+@lru_cache(maxsize=1)
 def load_collection():
+    """Load Chroma and the embedding model once per process."""
     client = chromadb.PersistentClient(path=CHROMA_DIR)
-    return client.get_collection(name=COLLECTION_NAME)
+    return client.get_collection(
+        name=COLLECTION_NAME,
+        embedding_function=get_embedding_function(),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_groq_client():
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY is missing")
+    return Groq(api_key=api_key)
+
 
 def log_to_csv(question, answer, duration):
     try:
@@ -23,80 +64,336 @@ def log_to_csv(question, answer, duration):
             writer = csv.writer(f)
             if not file_exists:
                 writer.writerow(["timestamp", "question", "answer", "duration_seconds"])
-            writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), question, answer, duration])
-    except Exception as e:
-        print(f"Log error: {e}")
+            writer.writerow([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                question,
+                answer,
+                duration,
+            ])
+    except Exception as exc:
+        print(f"Log error: {exc}")
+
+
+def _item_path(item):
+    url = (item.get("metadata") or {}).get("url", "")
+    return urlparse(url).path.lower()
+
+
+def _contains_person_name(item, name="ארי מנור"):
+    metadata = item.get("metadata") or {}
+    haystack = f"{metadata.get('title', '')} {item.get('document', '')}"
+    return name in haystack
+
+
+def _unsupported_fact_response(query):
+    """Reject known high-risk unsupported premises without asking the LLM to guess.
+
+    These patterns are company facts that the current ZOOZ corpus does not document
+    authoritatively. Returning a grounded fallback is safer than letting incidental
+    mentions in old articles/newsletters turn into a fabricated company claim.
+    """
+    q = " ".join((query or "").lower().split())
+
+    risky_patterns = (
+        "erp",
+        "שירות התשלומים",
+        "שירותי תשלומים",
+        "פרס נובל",
+        "כמה עובדים",
+        "מספר העובדים",
+        "הכנסות השנתיות",
+        "מה ההכנסות",
+        "כמה סניפים",
+        "מספר סניפים",
+        "תמציא לי",
+        "לא מופיעה באתר",
+        "לא מופיע באתר",
+    )
+
+    if any(pattern in q for pattern in risky_patterns):
+        return (
+            "אין לי מידע במקורות של ZOOZ שמאשר את הפרט או ההנחה שבשאלה, "
+            "ולכן לא אמציא תשובה."
+        )
+
+    return ""
+
+
+def curate_results_for_answer(ranked_results, query):
+    """Prefer authoritative ZOOZ pages for intents where noisy legacy content exists."""
+    if not ranked_results:
+        return []
+
+    intent = classify_query(query)
+
+    if intent == "contact":
+        contact = [item for item in ranked_results if _item_path(item) == "/contact.shtml"]
+        return contact[:1] if contact else ranked_results[:2]
+
+    if intent == "team":
+        canonical = [item for item in ranked_results if _item_path(item) == "/about_team.shtml"]
+        direct = [
+            item for item in ranked_results
+            if _contains_person_name(item) and _item_path(item) != "/about_team.shtml"
+        ]
+        selected = canonical + direct
+        return (selected or ranked_results)[:3]
+
+    if intent == "services_overview":
+        preferred_paths = [
+            "/about_profile.shtml",
+            "/about.shtml",
+            "/personel.shtml",
+        ]
+        preferred = []
+        for path in preferred_paths:
+            preferred.extend(item for item in ranked_results if _item_path(item) == path)
+        service_pages = [
+            item for item in ranked_results
+            if item not in preferred
+            and (
+                "services" in _item_path(item)
+                or "personel" in _item_path(item)
+                or "marketing" in _item_path(item)
+            )
+        ]
+        selected = preferred + service_pages
+        return (selected or ranked_results)[:4]
+
+    if intent == "clients":
+        direct_client_pages = [
+            item for item in ranked_results
+            if any(marker in _item_path(item) for marker in ["news_clients", "about_clients", "clients"])
+        ]
+        return (direct_client_pages or ranked_results)[:4]
+
+    if intent in {"triz", "systematic_innovation"}:
+        direct = [
+            item for item in ranked_results
+            if _item_path(item) in {
+                "/marketing_article14.shtml",
+                "/2-innovation-methods.shtml",
+                "/marketing_content_innovation.shtml",
+            }
+        ]
+        return (direct or ranked_results)[:4]
+
+    return ranked_results[:5]
+
+
+def response_guidance(query):
+    intent = classify_query(query)
+
+    if intent == "team":
+        return (
+            "השאלה היא על אדם/צוות. פתח בתפקיד הנוכחי שלו ב-ZOOZ. "
+            "ענה ב-2 עד 4 משפטים בלבד. אל תעמיס רשימת לקוחות, פרויקטים או חברות עבר."
+        )
+
+    if intent == "services_overview":
+        return (
+            "השאלה היא על שירותי החברה באופן כללי. הסתמך בראש ובראשונה על דף פרופיל החברה/אודות. "
+            "סכם את תחומי-העל בלבד: אסטרטגיה, שיווק וחדשנות; וכן ייעוץ ופיתוח ארגוני, "
+            "אימון עסקי ופיתוח מנהלים ועובדים."
+        )
+
+    if intent == "contact":
+        return "השאלה היא על יצירת קשר. תן רק את פרטי הקשר הישירים, בלי הרחבות."
+
+    if intent == "clients":
+        return (
+            "השאלה היא על לקוחות או ארגונים שעבדו עם ZOOZ. השתמש רק בעמודי לקוחות/פרויקטים ישירים. "
+            "אל תציג כחלק מלקוחות ZOOZ חברות שמופיעות רק ברקע התעסוקתי של יועץ או עובד."
+        )
+
+    if intent == "triz":
+        return (
+            "השאלה היא על TRIZ. אל תטען ש-ZOOZ פיתחה את TRIZ או את I-TRIZ אלא אם המקור אומר זאת במפורש. "
+            "הפרד בין המתודולוגיה עצמה לבין האופן שבו ZOOZ עבדה עם מומחי/פתרונות TRIZ או ייצגה גורם חיצוני."
+        )
+
+    if intent == "systematic_innovation":
+        return (
+            "השאלה היא על שיטות חדשנות. ציין רק שיטות שהמקורות אומרים במפורש ש-ZOOZ משתמשת בהן, מלמדת אותן "
+            "או מציעה במסגרת שירותיה. אל תסיק שרשימת מושגים כללית היא רשימת שיטות ש-ZOOZ מלמדת."
+        )
+
+    return "ענה ישירות לשאלה ואל תוסיף פרטים שאינם נחוצים למענה."
+
+
+def _trim_context(text):
+    text = (text or "").strip()
+    if len(text) <= MAX_CONTEXT_CHARS:
+        return text
+    shortened = text[:MAX_CONTEXT_CHARS]
+    if " " in shortened:
+        shortened = shortened.rsplit(" ", 1)[0]
+    return shortened + "…"
+
+
+def build_context(ranked_results):
+    parts = []
+    sources = []
+
+    for index, item in enumerate(ranked_results, start=1):
+        document = _trim_context(item["document"])
+        metadata = item["metadata"]
+        url = metadata.get("url", "")
+        title = metadata.get("title", "")
+
+        parts.append(
+            f"מקור {index}\n"
+            f"כותרת: {title}\n"
+            f"כתובת: {url}\n"
+            f"תוכן: {document}"
+        )
+        if url and url not in sources:
+            sources.append(url)
+
+    return "\n\n---\n\n".join(parts), sources
+
+
+def has_current_pricing_evidence(ranked_results):
+    """Accept a quoted ZOOZ service price only from an explicit pricing source."""
+    explicit_price_terms = ("מחיר", "מחירים", "תמחור", "pricing", "price")
+    currency_or_amount = re.compile(r"(?:₪|ש\"ח|שח|\$|€|\b\d+[\d,.]*\b)")
+
+    for item in ranked_results:
+        metadata = item.get("metadata", {})
+        url = metadata.get("url", "")
+        title = metadata.get("title", "")
+        document = item.get("document", "")
+        path = urlparse(url).path.lower()
+        title_l = title.lower()
+        combined = f"{title} {document}".lower()
+
+        if "/lazooz/" in path or "_article" in path or "/news" in path:
+            continue
+
+        explicit_source = (
+            "price" in path
+            or "pricing" in path
+            or any(term in title_l for term in explicit_price_terms)
+        )
+        if not explicit_source:
+            continue
+
+        if any(term in combined for term in explicit_price_terms) and currency_or_amount.search(combined):
+            return True
+
+    return False
+
 
 def ask_zooz(query):
     start_time = time.time()
-    try:
-        collection = load_collection()
-        results = collection.query(query_texts=[query], n_results=15)
-        documents = results["documents"][0]
-        metadatas = results["metadatas"][0]
 
-        context = ""
-        sources = []
-        for i, (doc, meta) in enumerate(zip(documents, metadatas)):
-            context += f"מקור {i+1}: {doc}\n"
-            if meta["url"] not in sources:
-                sources.append(meta["url"])
+    try:
+        intent = classify_query(query)
+
+        if intent == "out_of_scope":
+            answer = "אני יכול לעזור רק בנושאים הקשורים ל-ZOOZ."
+            duration = round(time.time() - start_time, 2)
+            log_to_csv(query, answer, duration)
+            return answer, []
+
+        if intent != "pricing":
+            guarded_answer = _unsupported_fact_response(query)
+            if guarded_answer:
+                duration = round(time.time() - start_time, 2)
+                log_to_csv(query, guarded_answer, duration)
+                return guarded_answer, []
+
+        if intent == "contact" and "כתובת" not in query:
+            answer = (
+                f"אפשר ליצור קשר עם ZOOZ בטלפון {CONTACT_PHONE} או במייל {CONTACT_EMAIL}. "
+                "פרטים נוספים מופיעים בדף יצירת הקשר של החברה."
+            )
+            duration = round(time.time() - start_time, 2)
+            log_to_csv(query, answer, duration)
+            return answer, [CONTACT_URL]
+
+        collection = load_collection()
+        ranked = query_collection(
+            collection,
+            query,
+            candidate_k=RETRIEVAL_CANDIDATES,
+            top_k=CONTEXT_CHUNKS,
+        )
+
+        if is_pricing_query(query) and not has_current_pricing_evidence(ranked):
+            answer = (
+                "אין לי במקורות של ZOOZ מחיר מדויק ועדכני לשירות שנשאל. "
+                "לקבלת הצעת מחיר מומלץ לפנות ל-ZOOZ דרך info@zooz.co.il או דרך אתר החברה."
+            )
+            duration = round(time.time() - start_time, 2)
+            log_to_csv(query, answer, duration)
+            return answer, [CONTACT_URL]
+
+        curated_ranked = curate_results_for_answer(ranked, query)
+        context, sources = build_context(curated_ranked)
+        guidance = response_guidance(query)
 
         prompt = f"""אתה העוזר הווירטואלי של חברת ZOOZ.
 
-=== איך לענות ===
-המידע בסעיף "מידע מאתר ZOOZ" למטה הוא ההקשר שממנו עליך לענות. אם המידע הנתון עונה - ולו באופן חלקי וסביר - על השאלה, ענה עליה בביטחון ובבירור על סמך אותו מידע. רק אם אחרי בדיקה מדוקדקת של כל הקטעים במידע הנתון, אף אחד מהם לא נוגע בכלל לנושא השאלה - אמור בפירוש "אין לי מידע מדויק על כך" והפנה ל-zooz.co.il או ל-info@zooz.co.il. אם ולו קטע אחד מתוך כל הקטעים שסופקו נוגע ברמה כלשהי לנושא, חובה עליך לענות על סמך אותו קטע, גם אם התשובה תהיה חלקית או כללית. אל תסרב לענות רק כי המידע לא מפורט לחלוטין - תשובה כללית סבירה על סמך ההקשר עדיפה על סירוב מיותר.
+ענה רק על בסיס המקורות שסופקו מאתר ZOOZ. המטרה העליונה היא דיוק.
 
-=== דיוק בפרטים ספציפיים - קריטי ===
-כאשר אתה מזכיר עובדה כללית מההקשר (למשל: "יש קשר בין ZOOZ ללקוח מסוים"), אסור לך להוסיף פרטים ספציפיים נוספים - תאריכים, שנים, מספרים, שמות פרויקטים, כמויות - אלא אם הם כתובים מילה-במילה באותו הקשר. אם ההקשר מזכיר לקוח או עובדה בלי תאריך/מספר/שם פרויקט מדויק, ציין את העובדה הכללית בלבד ואל תמציא את הפרט החסר כדי "להשלים" את התשובה. פרט מדויק שגוי (תאריך לא נכון, שם פרויקט מומצא) מזיק הרבה יותר מהיעדר הפרט.
+כללים:
+1. ענה בעברית, קצר וברור.
+2. אל תשתמש בידע חיצוני ואל תשלים פרטים חסרים מהשערה.
+3. עובדה ספציפית כמו מחיר, שם, תפקיד, לקוח, תאריך, מספר או שירות מותרת רק אם היא מופיעה במפורש במקורות.
+4. אם העובדה המדויקת לא מופיעה, אמור שאין לך מידע מדויק עליה במקורות של ZOOZ.
+5. אל תאשר הנחה לא נתמכת ואל תמציא שירותים, לקוחות, מחירים או נתונים.
+6. העדף דפי אודות, שירותים, צוות, קשר ועמודי תחום על פני אזכורים מקריים במאמרים ישנים.
+7. אל תענה על נושאים שאינם קשורים ל-ZOOZ.
+8. אל תזכיר ציוני retrieval או פרטים פנימיים של המערכת.
+9. מחיר שמופיע במאמר/עלון/דוגמה ישנה אינו מחירון שירותי ZOOZ.
+10. ענה רק למה שנשאל ואל תעמיס פרטים צדדיים.
 
-=== חוקים מחייבים ===
-1. ענה תמיד בעברית בלבד, גם אם שאלו באנגלית.
-2. כשהמשתמש כותב "החברה" או "הכוונה" — הכוונה תמיד ל-ZOOZ.
-3. אל תמציא פרטים שלא מופיעים במידע הנתון ולא ניתן להסיק אותם ממנו: שמות שירותים, שמות לקוחות, פרסים או הכרות, נתונים מספריים (כמו גודל צוות, משך פרויקט, מיקום משרדים).
-4. פרטי יצירת קשר (טלפון, כתובת פיזית, פקס) - ציין אותם רק אם הם מופיעים במפורש ובאופן מדויק במידע הנתון. אם לא - הפנה רק למייל info@zooz.co.il ולאתר zooz.co.il, ואל תמציא או תנחש מספר טלפון או כתובת.
-5. צוות ZOOZ הידוע: ארי מנור הוא המנכ"ל ומייסד החברה. טארק אבו שלבק הוא חלק מהצוות. אל תוסיף עליהם תפקידים, תארים או פרטים שלא מופיעים במידע הנתון.
-6. תמצית ולא מלל מיותר: ענה בצורה ממוקדת וברורה, אל תחזור על אותם משפטים כדי להאריך את התשובה.
+מיקוד לשאלה:
+{guidance}
 
-=== נושאים שאינם קשורים ל-ZOOZ ===
-רק לשאלות שאין להן שום קשר ל-ZOOZ (מזג אוויר, פוליטיקה, ספורט, בידור, אנשים שאינם מ-ZOOZ) — ענה:
-"אני יכול לעזור רק בנושאים הקשורים ל-ZOOZ. לשאלות נוספות בקר ב-zooz.co.il"
-
-=== מידע מאתר ZOOZ ===
+מקורות:
 {context}
 
-=== שאלת המשתמש ===
+שאלה:
 {query}
 
-=== תשובה ==="""
+תשובה:"""
 
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        client = get_groq_client()
         response = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
+            model=MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=800
+            temperature=0.1,
+            max_tokens=400,
+            reasoning_effort="low",
+            include_reasoning=False,
         )
-        answer = response.choices[0].message.content
+
+        answer = (response.choices[0].message.content or "").strip()
+        if not answer:
+            raise RuntimeError("Groq returned empty answer content")
+
         duration = round(time.time() - start_time, 2)
         log_to_csv(query, answer, duration)
         return answer, sources
 
-    except Exception as e:
+    except Exception as exc:
         duration = round(time.time() - start_time, 2)
-        print(f"CHATBOT ERROR: {repr(e)}")
-        error_msg = f"אירעה שגיאה טכנית. אנא נסה שוב או פנה ל-info@zooz.co.il"
-        log_to_csv(query, f"ERROR: {e}", duration)
+        print(f"CHATBOT ERROR: {repr(exc)}")
+        error_msg = "אירעה שגיאה טכנית. אנא נסה שוב או פנה ל-info@zooz.co.il"
+        log_to_csv(query, f"ERROR: {exc}", duration)
         return error_msg, []
+
 
 if __name__ == "__main__":
     print("ZOOZ Chatbot - type 'exit' to quit")
     while True:
-        q = input("Question: ").strip()
-        if q == "exit":
+        question = input("Question: ").strip()
+        if question == "exit":
             break
-        if q:
-            answer, sources = ask_zooz(q)
+        if question:
+            answer, sources = ask_zooz(question)
             print(answer)
             print("Sources:")
             for url in sources:
