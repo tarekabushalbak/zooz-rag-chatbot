@@ -12,6 +12,6 @@ SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 print("Embedding model cached successfully")
 PY
 
-gdown https://drive.google.com/uc?id=1PFYRBHW41UJSNnz-fTkJsiPVDjOj4xQR -O chroma_db.zip
+gdown https://drive.google.com/uc?id=1Xu0NXMCmCZJVUvQVeiHk0qtJJIM1RD2h -O chroma_db.zip
 unzip -o chroma_db.zip -d .
 rm chroma_db.zip
