@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 from collections import OrderedDict
 from uuid import uuid4
 
@@ -139,6 +140,50 @@ def _contextualize_question(question, history):
     )
 
 
+def _clean_answer_formatting(answer):
+    """Normalize lightweight Markdown/HTML artifacts before sending to the UI.
+
+    The model occasionally emits Markdown tables or literal <br> tags. The web
+    client intentionally supports only simple bold text and line breaks, so turn
+    those artifacts into readable plain lines without changing the answer facts.
+    """
+    text = str(answer or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+
+    cleaned_lines = []
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+
+        if not line:
+            if cleaned_lines and cleaned_lines[-1] != "":
+                cleaned_lines.append("")
+            continue
+
+        # Remove Markdown table separator rows such as |---|---|.
+        table_core = line.strip("|").strip()
+        if "|" in line and table_core and re.fullmatch(r"[:\-\s|]+", table_core):
+            continue
+
+        # Convert Markdown table rows into readable text/bullets.
+        if "|" in line:
+            cells = [cell.strip() for cell in line.strip("|").split("|") if cell.strip()]
+            if len(cells) >= 2:
+                if any(label in cells[0] for label in ("תחום", "נושא", "קטגוריה")):
+                    cleaned_lines.append("**" + " — ".join(cells) + "**")
+                else:
+                    cleaned_lines.append("• " + " — ".join(cells))
+                continue
+
+        # Remove a leftover table pipe at the beginning/end of a wrapped line.
+        cleaned_lines.append(line.strip("|").strip())
+
+    while cleaned_lines and cleaned_lines[-1] == "":
+        cleaned_lines.pop()
+
+    return "\n".join(cleaned_lines)
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -162,6 +207,7 @@ def ask():
 
     try:
         answer, sources = ask_zooz(rag_question)
+        answer = _clean_answer_formatting(answer)
 
         # Do not make temporary technical failures part of future context.
         if not (answer or "").startswith("אירעה שגיאה טכנית"):
