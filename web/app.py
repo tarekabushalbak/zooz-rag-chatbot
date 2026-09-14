@@ -14,12 +14,12 @@ load_dotenv()
 app = Flask(__name__)
 
 # Lightweight in-memory conversation memory.
-# It is intentionally short and per browser session so follow-up questions can
-# understand context without changing the RAG knowledge base or storing secrets.
+# The memory is deliberately conservative: only clear follow-up questions are
+# contextualized. Independent questions are always sent to the RAG unchanged.
 CONVERSATION_COOKIE = "zooz_conversation"
 MAX_CONVERSATIONS = 200
-MAX_TURNS = 2
-MAX_ANSWER_CONTEXT_CHARS = 700
+MAX_TURNS = 1
+MAX_ANSWER_CONTEXT_CHARS = 350
 _conversations = OrderedDict()
 
 
@@ -57,56 +57,71 @@ def _remember_turn(conversation_id, question, answer):
 
 
 def _looks_like_follow_up(question):
+    """Return True only for questions that clearly depend on prior context.
+
+    We intentionally avoid broad prefixes such as "ומה", "ואיך" or "למה"
+    because they can also start completely new questions.
+    """
     q = " ".join((question or "").strip().lower().split())
     if not q:
         return False
 
-    follow_up_prefixes = (
+    explicit_prefixes = (
         "ומה לגבי",
         "ומה עם",
         "ומה בנושא",
         "ולגבי",
-        "ומה",
-        "ואיך",
-        "ולמה",
-        "ואילו",
-        "אז מה",
-        "אז איך",
         "ומה מהם",
+        "ומה מהן",
+        "איזה מהם",
+        "איזו מהן",
+        "מי מהם",
+        "מי מהן",
+        "מה לגבי זה",
+        "מה לגבי זאת",
+        "מה עם זה",
+        "מה עם זאת",
+        "תסביר את זה",
+        "תסביר את זאת",
+        "תסביר על זה",
+        "תסביר על זאת",
+        "אפשר להרחיב על זה",
+        "אפשר להרחיב על זאת",
+        "אפשר לפרט על זה",
+        "אפשר לפרט על זאת",
+        "מה האפשרות הראשונה",
+        "מה האפשרות השנייה",
+        "ומה האפשרות הראשונה",
+        "ומה האפשרות השנייה",
+        "ומה עוד לגבי",
+        "ומה עוד על",
     )
-    if q.startswith(follow_up_prefixes):
+
+    if q.startswith(explicit_prefixes):
         return True
 
-    # Short questions containing references such as "זה", "אותו" or "הראשון"
-    # are usually dependent on the previous turn.
-    if len(q) <= 55:
-        reference_terms = (
-            "זה",
-            "זאת",
-            "אותו",
-            "אותה",
-            "אותם",
-            "אותן",
-            "הראשון",
-            "השני",
-            "השלישי",
-            "כזה",
-            "כאלה",
-            "שם",
-        )
-        words = set(q.replace("?", "").replace(",", "").split())
-        if any(term in words for term in reference_terms):
-            return True
+    # Very short elliptical follow-ups that are meaningless without prior context.
+    exact_follow_ups = {
+        "למה?",
+        "למה",
+        "איך?",
+        "איך",
+        "ומה עוד?",
+        "ומה עוד",
+        "תפרט",
+        "תפרט יותר",
+        "אפשר להרחיב?",
+        "אפשר להרחיב",
+    }
+
+    if q in exact_follow_ups:
+        return True
 
     return False
 
 
 def _contextualize_question(question, history):
-    """Add only a small amount of recent conversation context for follow-ups.
-
-    The existing RAG engine still retrieves evidence from ZOOZ sources and keeps
-    its hallucination safeguards. Independent questions are sent unchanged.
-    """
+    """Attach minimal prior context only when the question is a clear follow-up."""
     if not history or not _looks_like_follow_up(question):
         return question
 
@@ -116,10 +131,11 @@ def _contextualize_question(question, history):
 
     return (
         f"שאלת המשך נוכחית: {question}\n"
-        f"הקשר מהתור הקודם באותה שיחה:\n"
+        f"הקשר קצר מהתור הקודם באותה שיחה:\n"
         f"שאלה קודמת: {previous_question}\n"
         f"תשובה קודמת: {previous_answer}\n"
-        "ענה על שאלת ההמשך בלבד, והסתמך על מקורות ZOOZ שהמערכת מאחזרת."
+        "השתמש בהקשר רק כדי להבין למה המשתמש מתייחס. "
+        "את התשובה עצמה יש לבסס רק על מקורות ZOOZ שהמערכת מאחזרת."
     )
 
 
@@ -147,7 +163,7 @@ def ask():
     try:
         answer, sources = ask_zooz(rag_question)
 
-        # Do not make a temporary technical failure part of the conversation memory.
+        # Do not make temporary technical failures part of future context.
         if not (answer or "").startswith("אירעה שגיאה טכנית"):
             _remember_turn(conversation_id, question, answer)
 
