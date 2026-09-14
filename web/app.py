@@ -143,9 +143,10 @@ def _contextualize_question(question, history):
 def _clean_answer_formatting(answer):
     """Normalize lightweight Markdown/HTML artifacts before sending to the UI.
 
-    The model occasionally emits Markdown tables or literal <br> tags. The web
-    client intentionally supports only simple bold text and line breaks, so turn
-    those artifacts into readable plain lines without changing the answer facts.
+    The model occasionally emits Markdown tables, duplicate bullets, or literal
+    <br> tags. The web client intentionally supports only simple bold text and
+    line breaks, so turn those artifacts into readable plain lines without
+    changing the answer facts.
     """
     text = str(answer or "")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -169,14 +170,24 @@ def _clean_answer_formatting(answer):
         if "|" in line:
             cells = [cell.strip() for cell in line.strip("|").split("|") if cell.strip()]
             if len(cells) >= 2:
+                # Replace generic Markdown table headers with a natural section title.
                 if any(label in cells[0] for label in ("תחום", "נושא", "קטגוריה")):
-                    cleaned_lines.append("**" + " — ".join(cells) + "**")
+                    cleaned_lines.append("**השירותים המתאימים:**")
                 else:
-                    cleaned_lines.append("• " + " — ".join(cells))
+                    normalized_cells = [
+                        re.sub(r"^[•\-*]+\s*", "", cell).strip()
+                        for cell in cells
+                    ]
+                    cleaned_lines.append("• " + " — ".join(normalized_cells))
                 continue
 
         # Remove a leftover table pipe at the beginning/end of a wrapped line.
-        cleaned_lines.append(line.strip("|").strip())
+        line = line.strip("|").strip()
+
+        # Collapse accidental duplicate bullets such as "• • text" to one bullet.
+        line = re.sub(r"^(?:[•]\s*){2,}", "• ", line)
+
+        cleaned_lines.append(line)
 
     while cleaned_lines and cleaned_lines[-1] == "":
         cleaned_lines.pop()
