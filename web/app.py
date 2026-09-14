@@ -143,10 +143,10 @@ def _contextualize_question(question, history):
 def _clean_answer_formatting(answer):
     """Normalize lightweight Markdown/HTML artifacts before sending to the UI.
 
-    The model occasionally emits Markdown tables, duplicate bullets, or literal
-    <br> tags. The web client intentionally supports only simple bold text and
-    line breaks, so turn those artifacts into readable plain lines without
-    changing the answer facts.
+    The model occasionally emits Markdown tables, duplicate bullets, literal
+    <br> tags, or unmatched single asterisks. The web client intentionally
+    supports only simple bold text and line breaks, so normalize those artifacts
+    without changing the answer facts.
     """
     text = str(answer or "")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -174,8 +174,9 @@ def _clean_answer_formatting(answer):
                 if any(label in cells[0] for label in ("תחום", "נושא", "קטגוריה")):
                     cleaned_lines.append("**השירותים המתאימים:**")
                 else:
+                    # Remove only real bullet markers. Keep Markdown **bold** intact.
                     normalized_cells = [
-                        re.sub(r"^[•\-*]+\s*", "", cell).strip()
+                        re.sub(r"^(?:[•\-]\s*)+", "", cell).strip()
                         for cell in cells
                     ]
                     cleaned_lines.append("• " + " — ".join(normalized_cells))
@@ -192,7 +193,13 @@ def _clean_answer_formatting(answer):
     while cleaned_lines and cleaned_lines[-1] == "":
         cleaned_lines.pop()
 
-    return "\n".join(cleaned_lines)
+    result = "\n".join(cleaned_lines)
+
+    # Remove only unmatched/single Markdown asterisks while preserving valid **bold**.
+    # Example: *text* -> text, while **text** remains bold in the web client.
+    result = re.sub(r"(?<!\*)\*(?!\*)", "", result)
+
+    return result
 
 
 @app.route("/")
