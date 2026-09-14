@@ -1,14 +1,18 @@
 import sys
 import os
 import re
+import secrets
+import time
 from collections import OrderedDict
+from datetime import datetime, timezone
 from uuid import uuid4
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 from dotenv import load_dotenv
 from scripts.rag_engine import ask_zooz
+from web.logging_store import log_interaction, export_logs_csv
 
 load_dotenv()
 
@@ -202,6 +206,25 @@ def _clean_answer_formatting(answer):
     return result
 
 
+def _interaction_status(answer, sources, error=""):
+    text = (answer or "").strip()
+    if error or text.startswith("אירעה שגיאה טכנית"):
+        return "ERROR"
+
+    fallback_phrases = (
+        "אין לי מידע",
+        "אין מספיק מידע",
+        "לא מצאתי",
+        "איני יכול",
+        "אני יכול לעזור רק",
+        "אין במקורות",
+    )
+    if not sources or any(phrase in text for phrase in fallback_phrases):
+        return "FALLBACK"
+
+    return "OK"
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -210,6 +233,31 @@ def index():
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/admin/logs.csv")
+def download_logs():
+    expected_token = os.environ.get("LOG_EXPORT_TOKEN", "").strip()
+    provided_token = request.args.get("token", "").strip()
+
+    if not expected_token or not provided_token or not secrets.compare_digest(
+        expected_token, provided_token
+    ):
+        return jsonify({"error": "forbidden"}), 403
+
+    try:
+        csv_bytes = export_logs_csv()
+        filename = f"zooz_chat_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        return Response(
+            csv_bytes,
+            mimetype="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+    except Exception as exc:
+        return jsonify({"error": "log export failed", "details": str(exc)}), 500
 
 
 @app.route("/ask", methods=["POST"])
@@ -223,13 +271,29 @@ def ask():
     history = _get_history(conversation_id)
     rag_question = _contextualize_question(question, history)
 
+    asked_at = datetime.now(timezone.utc)
+    started_at = time.perf_counter()
+
     try:
         answer, sources = ask_zooz(rag_question)
         answer = _clean_answer_formatting(answer)
+        response_time = time.perf_counter() - started_at
+        status = _interaction_status(answer, sources)
 
         # Do not make temporary technical failures part of future context.
         if not (answer or "").startswith("אירעה שגיאה טכנית"):
             _remember_turn(conversation_id, question, answer)
+
+        # Logging is best-effort and never blocks the chatbot response.
+        log_interaction(
+            asked_at=asked_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=answer,
+            response_time_seconds=response_time,
+            sources=sources,
+            status=status,
+        )
 
         response = jsonify({"answer": answer, "sources": sources})
         response.set_cookie(
@@ -243,6 +307,20 @@ def ask():
         return response
 
     except Exception as exc:
+        response_time = time.perf_counter() - started_at
+
+        # Even unexpected errors are recorded when logging storage is available.
+        log_interaction(
+            asked_at=asked_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer="",
+            response_time_seconds=response_time,
+            sources=[],
+            status="ERROR",
+            error=str(exc),
+        )
+
         return jsonify({"error": str(exc)}), 500
 
 
