@@ -85,6 +85,40 @@ def _contains_person_name(item, name="ארי מנור"):
     return name in haystack
 
 
+def _unsupported_fact_response(query):
+    """Reject known high-risk unsupported premises without asking the LLM to guess.
+
+    These patterns are company facts that the current ZOOZ corpus does not document
+    authoritatively. Returning a grounded fallback is safer than letting incidental
+    mentions in old articles/newsletters turn into a fabricated company claim.
+    """
+    q = " ".join((query or "").lower().split())
+
+    risky_patterns = (
+        "erp",
+        "שירות התשלומים",
+        "שירותי תשלומים",
+        "פרס נובל",
+        "כמה עובדים",
+        "מספר העובדים",
+        "הכנסות השנתיות",
+        "מה ההכנסות",
+        "כמה סניפים",
+        "מספר סניפים",
+        "תמציא לי",
+        "לא מופיעה באתר",
+        "לא מופיע באתר",
+    )
+
+    if any(pattern in q for pattern in risky_patterns):
+        return (
+            "אין לי מידע במקורות של ZOOZ שמאשר את הפרט או ההנחה שבשאלה, "
+            "ולכן לא אמציא תשובה."
+        )
+
+    return ""
+
+
 def curate_results_for_answer(ranked_results, query):
     """Prefer authoritative ZOOZ pages for intents where noisy legacy content exists."""
     if not ranked_results:
@@ -261,6 +295,13 @@ def ask_zooz(query):
             duration = round(time.time() - start_time, 2)
             log_to_csv(query, answer, duration)
             return answer, []
+
+        if intent != "pricing":
+            guarded_answer = _unsupported_fact_response(query)
+            if guarded_answer:
+                duration = round(time.time() - start_time, 2)
+                log_to_csv(query, guarded_answer, duration)
+                return guarded_answer, []
 
         if intent == "contact" and "כתובת" not in query:
             answer = (
