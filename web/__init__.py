@@ -17,6 +17,10 @@ ARI_SOURCES = [
     "https://www.zooz.co.il/LaZOOZ/LaZOOZ89.html",
 ]
 
+TEAM_SOURCES = [
+    "https://www.zooz.co.il/about_team.shtml",
+]
+
 CLIENT_SOURCES = [
     "https://www.zooz.co.il/about_clients.shtml",
 ]
@@ -54,6 +58,107 @@ def _normalize(text):
     q = (text or "").strip().lower()
     q = re.sub(r"[?!.,;:׳'\"״()\[\]{}\-–—]+", " ", q)
     return " ".join(q.split())
+
+
+def _is_zooz_manager_question(query):
+    q = _normalize(query)
+    has_zooz = "zooz" in q or "זוז" in q
+    if not has_zooz:
+        return False
+    return any(term in q for term in (
+        "מי מנהל",
+        "מי המנהל",
+        "מי מנכ",
+        "מי המנכ",
+        "המנהל כיום",
+        "מנהל את",
+        "מנכ ל",
+    ))
+
+
+def _zooz_manager_answer():
+    return (
+        "לפי עמוד הצוות הרשמי של ZOOZ, **ארי מנור הוא מנכ״ל ZOOZ**. הוא מוצג כיועץ שיווקי ומומחה "
+        "בתחומי אסטרטגיה, שיווק, ניהול, חדשנות ויצירתיות, ולפי האתר ליווה תהליכי אסטרטגיה וחדשנות "
+        "בלמעלה מ-300 ארגונים בארץ ובעולם.\n\n"
+        "לכן, כשנשאל מי מנהל את ZOOZ כיום, התשובה הישירה על בסיס עמוד הצוות היא ארי מנור — ולא מנהל "
+        "של תחום משנה כמו הדרכה או ייעוץ."
+    )
+
+
+def _is_curefacts_question(query):
+    return "curefacts" in _normalize(query)
+
+
+def _curefacts_answer(query):
+    q = _normalize(query)
+    if any(term in q for term in ("לפני zooz", "לפני זוז", "מאוחרת", "מאוחר", "קדם", "קדמה", "מתי")):
+        return (
+            "לפי עמוד הצוות והעלון של ZOOZ, **CureFacts מוצג כפעילות מאוחרת של ארי מנור ולא כתפקיד שקדם ל-ZOOZ**. "
+            "בעמוד הצוות ארי מוצג כמנכ״ל-מייסד של CureFacts, ובעלון ZOOZ נכתב שבשנים האחרונות הוא הקים ומנהל את המיזם.\n\n"
+            "האתר אינו נותן כאן תאריך הקמה מדויק שמאפשר לבנות ציר שנים מלא, ולכן הניסוח הבטוח הוא: CureFacts הוא "
+            "מיזם מאוחר/עדכני של ארי, ולא אחד מהתפקידים שמופיעים ברשימת התפקידים שלו בעבר לפני פעילותו ב-ZOOZ."
+        )
+
+    if any(term in q for term in ("קשר", "קשור", "הקשר")):
+        return (
+            "הקשר הוא דרך **ארי מנור**: בעמוד הצוות של ZOOZ הוא מוצג כמנכ״ל ZOOZ ובמקביל כ**מנכ״ל-מייסד של CureFacts**, "
+            "מיזם בתחום בריאות הציבור. כלומר, המקור מתאר קשר אישי-מקצועי דרך ארי מנור; הוא לא מציג את CureFacts "
+            "כלקוח של ZOOZ או כפרויקט משותף בין שתי החברות.\n\n"
+            "בעלון ZOOZ מצוין שבשנים האחרונות ארי הקים ומנהל את CureFacts, ולכן חשוב לא לערבב את המיזם עם תפקידים "
+            "קודמים שלו או להמציא קשר עסקי שאינו כתוב במקורות."
+        )
+
+    return (
+        "**CureFacts** מופיע במקורות של ZOOZ כמיזם בתחום בריאות הציבור שארי מנור הוא מנכ״ל-מייסד שלו. "
+        "בעלון של ZOOZ מצוין שבשנים האחרונות הוא הקים ומנהל את המיזם.\n\n"
+        "זהו מידע על פעילותו של ארי מנור; המקורות אינם מציגים את CureFacts כלקוח של ZOOZ או כתחום שירות של ZOOZ."
+    )
+
+
+def _is_team_overview_question(query):
+    q = _normalize(query)
+    return any(term in q for term in (
+        "מי עוד מופיע בצוות",
+        "מי עוד בצוות",
+        "מי בצוות של zooz",
+        "מי בצוות של זוז",
+        "אנשי הצוות של zooz",
+        "אנשי הצוות של זוז",
+        "חברי הצוות של zooz",
+        "חברי הצוות של זוז",
+    ))
+
+
+def _team_overview_answer():
+    return (
+        "בעמוד **הצוות של ZOOZ** ארי מנור מופיע כמנכ״ל, ולצדו מופיעים אנשי מפתח ויועצים נוספים מתחומים שונים. "
+        "בין השמות שמופיעים בעמוד: **שחר מור** (יועץ שיווקי וטכנולוגי ומנחה בכיר), **פרדי בלסן** (יועץ שיווקי "
+        "ומרצה בכיר), **דרור צורף** (יועץ שיווקי ומרצה בכיר), **איתי הל-אור** (יועץ עסקי ומנחה בכיר) ו**טל קופרמן** "
+        "(מנחה בכיר ומאמן עסקי).\n\n"
+        "העמוד עצמו מציג אנשי מפתח מתחומי אסטרטגיה, שיווק, ניהול, פיתוח ארגוני, חדשנות והדרכה. זו רשימת דוגמאות "
+        "מתוך העמוד, לא ניסיון להסיק מי עובד בחברה רק מאזכור מקרי במאמר ישן."
+    )
+
+
+def _is_ari_more_question(query):
+    q = _normalize(query)
+    return q in {
+        "יש עוד משהו חשוב עליו",
+        "יש עוד משהו עליו",
+        "מה עוד חשוב עליו",
+        "ומה עוד חשוב עליו",
+    }
+
+
+def _ari_more_answer():
+    return (
+        "כן. מעבר לתפקידו כמנכ״ל ZOOZ, עמוד הצוות מציין שארי מנור ליווה תהליכי אסטרטגיה וחדשנות בלמעלה "
+        "מ-300 ארגונים בארץ ובעולם, ובהם Google, eBay, שטראוס, אינטל, 3M, כתר ו-AIG. הוא גם מוצג כמנכ״ל-מייסד "
+        "של CureFacts וכבעל תואר שני בגנטיקה מאוניברסיטת תל-אביב.\n\n"
+        "ברקע המקצועי שלו מופיעים גם תפקידי עבר כמנכ״ל SIT, מנהל תקשורת שיווקית ב-Compugen ומנכ״ל HighQ בשבדיה, "
+        "וכן הוראה בניהול חדשנות בתוכניות אקדמיות. אלה פרטים נוספים שמופיעים במקור הרשמי בלי לערבב בין עבר להווה."
+    )
 
 
 def _is_ari_past_question(query):
@@ -171,8 +276,6 @@ def _services_answer():
 
 def _is_competitive_strategy_question(query):
     q = _normalize(query)
-    # Hebrew definite prefixes (e.g. "האסטרטגיות התחרותיות") make exact phrase
-    # matching brittle. Match the semantic stems instead.
     return "אסטרטג" in q and "תחרות" in q
 
 
@@ -251,7 +354,6 @@ def _is_systematic_innovation_question(query):
     has_phrase = "חדשנות שיטתית" in q or "חדשנות השיטתית" in q
     if not has_phrase:
         return False
-    # Do not override explicit SIT-tool questions handled elsewhere.
     return "חשיבה המצאתית" not in q and "sit" not in q
 
 
@@ -320,7 +422,18 @@ def _guarded_response_guidance(query):
 
 
 def _guarded_ask_zooz(query):
-    # Chronology-sensitive Ari follow-ups must be handled before the generic profile match.
+    if _is_zooz_manager_question(query):
+        return _zooz_manager_answer(), TEAM_SOURCES
+
+    if _is_curefacts_question(query):
+        return _curefacts_answer(query), ARI_SOURCES
+
+    if _is_team_overview_question(query):
+        return _team_overview_answer(), TEAM_SOURCES
+
+    if _is_ari_more_question(query):
+        return _ari_more_answer(), ARI_SOURCES
+
     if _is_ari_past_question(query):
         return _ari_past_answer(), ARI_SOURCES
 
@@ -336,7 +449,6 @@ def _guarded_ask_zooz(query):
     if _is_services_question(query):
         return _services_answer(), SERVICES_SOURCES
 
-    # Specific strategy intents must be checked before the broad strategy-types intent.
     if _is_competitive_strategy_question(query):
         return _competitive_strategy_answer(), COMPETITIVE_STRATEGY_SOURCES
 
