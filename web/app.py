@@ -30,6 +30,11 @@ TEMPORARY_ERROR_PREFIXES = (
     "השירות עמוס זמנית",
 )
 
+MULTIPLICATION_SOURCES = [
+    "https://www.zooz.co.il/2-Innovation-tools.shtml",
+    "https://www.zooz.co.il/2-Product-Innovation.shtml",
+]
+
 
 def _valid_conversation_id(value):
     if not value or len(value) != 32:
@@ -62,6 +67,69 @@ def _remember_turn(conversation_id, question, answer):
 
     while len(_conversations) > MAX_CONVERSATIONS:
         _conversations.popitem(last=False)
+
+
+def _normalized_short_question(question):
+    q = " ".join((question or "").strip().lower().split())
+    return q.strip(" ?!.,׳'\"״")
+
+
+def _is_smalltalk_question(question):
+    """Handle simple greetings locally instead of spending RAG/model tokens."""
+    q = _normalized_short_question(question)
+    greetings = {
+        "היי",
+        "הי",
+        "שלום",
+        "מה שלומך",
+        "מה נשמע",
+        "היי מה שלומך",
+        "הי מה שלומך",
+        "שלום מה שלומך",
+        "היי מה נשמע",
+        "הי מה נשמע",
+        "שלום מה נשמע",
+        "בוקר טוב",
+        "צהריים טובים",
+        "ערב טוב",
+    }
+    return q in greetings
+
+
+def _is_multiplication_question(question):
+    """Recognize the SIT 'Multiplication' tool even without extra context."""
+    q = _normalized_short_question(question)
+    direct_forms = {
+        "הכפלה",
+        "מה זה הכפלה",
+        "מהי הכפלה",
+        "איך עושים הכפלה",
+        "איך מבצעים הכפלה",
+        "כלי הכפלה",
+        "מהו כלי ההכפלה",
+        "מה זה כלי ההכפלה",
+    }
+    if q in direct_forms:
+        return True
+
+    return "הכפלה" in q and any(term in q for term in (
+        "כלי חשיבה",
+        "חשיבה המצאתית",
+        "sit",
+        "הכפל מרכיב",
+    ))
+
+
+def _multiplication_answer():
+    return (
+        "**הכפלה** היא אחד מששת כלי החשיבה ההמצאתית של SIT. העיקרון המרכזי הוא: "
+        "**הכפל מרכיב ובחן את התועלת**. כלומר, בוחרים מרכיב קיים במוצר או בשירות, "
+        "מוסיפים לו עותק אחד או יותר — זהה או עם שינוי מסוים — ואז בודקים איזו תועלת חדשה יכולה להיווצר מהשינוי.\n\n"
+        "בפועל עובדים בצורה שיטתית: מזהים את המרכיבים הקיימים, בוחרים מרכיב מתאים, "
+        "מכפילים אותו ורק לאחר מכן מחפשים ערך שימושי שנוצר — למשל פונקציונליות חדשה, "
+        "שיפור בחוויית המשתמש או פתרון לצורך שלא קיבל מענה קודם. המטרה אינה להכפיל סתם, "
+        "אלא להשתמש בהכפלה כטריגר לרעיון חדש ומועיל."
+    )
 
 
 def _looks_like_follow_up(question):
@@ -112,6 +180,7 @@ def _looks_like_follow_up(question):
 
 
 def _contextualize_question(question, history):
+    """Keep an explicit follow-up anchored to the exact previous subject."""
     if not history or not _looks_like_follow_up(question):
         return question
 
@@ -120,13 +189,13 @@ def _contextualize_question(question, history):
     previous_answer = previous.get("answer", "").strip()
 
     return (
-        f"שאלת המשך נוכחית: {question}\n"
-        f"הקשר קצר מהתור הקודם באותה שיחה:\n"
-        f"שאלה קודמת: {previous_question}\n"
-        f"תשובה קודמת: {previous_answer}\n"
-        "השתמש בהקשר רק כדי להבין למה המשתמש מתייחס. "
-        "אם שאלת ההמשך מבקשת עוד מידע (למשל 'זהו?' או 'מה עוד?'), הרחב עם פרטים נוספים ורלוונטיים. "
-        "את התשובה עצמה יש לבסס רק על מקורות ZOOZ שהמערכת מאחזרת."
+        f"נושא השיחה הקודם: {previous_question}\n"
+        f"בקשת ההמשך של המשתמש: {question}\n"
+        "ענה על אותו נושא בדיוק ואל תעבור לנושא אחר. "
+        "אם המשתמש מבקש עוד מידע (למשל 'זהו?', 'יש עוד?' או 'מה עוד?'), "
+        "הוסף פרטים חדשים ורלוונטיים על הנושא הקודם, בלי לחזור סתם על אותה תשובה.\n"
+        f"התשובה הקודמת, לצורך מניעת חזרות בלבד: {previous_answer}\n"
+        "את כל העובדות בתשובה החדשה יש לבסס רק על מקורות ZOOZ שהמערכת מאחזרת."
     )
 
 
@@ -178,23 +247,45 @@ def _is_temporary_error_answer(answer):
     return any(text.startswith(prefix) for prefix in TEMPORARY_ERROR_PREFIXES)
 
 
+def _is_no_information_answer(answer):
+    """Suppress unrelated retrieval sources when the answer says evidence is missing."""
+    text = (answer or "").strip()
+    no_info_patterns = (
+        "אין לי מידע",
+        "אין מספיק מידע",
+        "אין במקורות",
+        "אין מידע במקורות",
+        "אין במקורות של ZOOZ מידע",
+        "לא מצאתי",
+        "לא אמציא תשובה",
+        "איני יכול",
+        "אני יכול לעזור רק",
+    )
+    return any(pattern in text for pattern in no_info_patterns)
+
+
 def _interaction_status(answer, sources, error=""):
     text = (answer or "").strip()
     if error or _is_temporary_error_answer(text):
         return "ERROR"
 
-    fallback_phrases = (
-        "אין לי מידע",
-        "אין מספיק מידע",
-        "לא מצאתי",
-        "איני יכול",
-        "אני יכול לעזור רק",
-        "אין במקורות",
-    )
-    if not sources or any(phrase in text for phrase in fallback_phrases):
+    if not sources or _is_no_information_answer(text):
         return "FALLBACK"
 
     return "OK"
+
+
+def _json_response_with_cookie(payload, conversation_id):
+    response = jsonify(payload)
+    response.set_cookie(
+        CONVERSATION_COOKIE,
+        conversation_id,
+        max_age=8 * 60 * 60,
+        httponly=True,
+        samesite="Lax",
+        secure=request.is_secure,
+    )
+    return response
 
 
 @app.route("/")
@@ -240,15 +331,57 @@ def ask():
         return jsonify({"error": "no question"}), 400
 
     conversation_id = _conversation_id()
-    history = _get_history(conversation_id)
-    rag_question = _contextualize_question(question, history)
-
     asked_at = datetime.now(timezone.utc)
     started_at = time.perf_counter()
+
+    # Greetings do not need retrieval or an LLM call.
+    if _is_smalltalk_question(question):
+        answer = "היי! תודה, הכול טוב 😊 איך אפשר לעזור לך בנושא ZOOZ?"
+        response_time = time.perf_counter() - started_at
+        log_interaction(
+            asked_at=asked_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=answer,
+            response_time_seconds=response_time,
+            sources=[],
+            status="OK",
+        )
+        return _json_response_with_cookie({"answer": answer, "sources": []}, conversation_id)
+
+    # The SIT multiplication tool is answered deterministically from official ZOOZ material.
+    # This avoids confusing it with text duplication or with the separate SCAMPER method.
+    if _is_multiplication_question(question):
+        answer = _multiplication_answer()
+        sources = MULTIPLICATION_SOURCES
+        response_time = time.perf_counter() - started_at
+        _remember_turn(conversation_id, question, answer)
+        log_interaction(
+            asked_at=asked_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=answer,
+            response_time_seconds=response_time,
+            sources=sources,
+            status="OK",
+        )
+        return _json_response_with_cookie(
+            {"answer": answer, "sources": sources},
+            conversation_id,
+        )
+
+    history = _get_history(conversation_id)
+    rag_question = _contextualize_question(question, history)
 
     try:
         answer, sources = ask_zooz(rag_question)
         answer = _clean_answer_formatting(answer)
+
+        # If the answer explicitly says the information is unavailable, do not display
+        # incidental retrieval sources that do not actually support an answer.
+        if _is_no_information_answer(answer):
+            sources = []
+
         response_time = time.perf_counter() - started_at
         status = _interaction_status(answer, sources)
 
@@ -265,16 +398,10 @@ def ask():
             status=status,
         )
 
-        response = jsonify({"answer": answer, "sources": sources})
-        response.set_cookie(
-            CONVERSATION_COOKIE,
+        return _json_response_with_cookie(
+            {"answer": answer, "sources": sources},
             conversation_id,
-            max_age=8 * 60 * 60,
-            httponly=True,
-            samesite="Lax",
-            secure=request.is_secure,
         )
-        return response
 
     except Exception as exc:
         response_time = time.perf_counter() - started_at
