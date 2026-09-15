@@ -88,7 +88,7 @@ def _normalized_short_question(question):
 
 
 def _is_smalltalk_question(question):
-    """Handle simple greetings locally instead of spending RAG/model tokens."""
+    """Handle simple Hebrew/English greetings locally instead of spending RAG/model tokens."""
     q = _normalized_short_question(question)
     greetings = {
         "היי",
@@ -105,6 +105,18 @@ def _is_smalltalk_question(question):
         "בוקר טוב",
         "צהריים טובים",
         "ערב טוב",
+        "hello",
+        "hi",
+        "hey",
+        "hello there",
+        "hi there",
+        "hey there",
+        "how are you",
+        "hello how are you",
+        "hi how are you",
+        "good morning",
+        "good afternoon",
+        "good evening",
     }
     return q in greetings
 
