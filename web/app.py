@@ -35,6 +35,16 @@ MULTIPLICATION_SOURCES = [
     "https://www.zooz.co.il/2-Product-Innovation.shtml",
 ]
 
+ARI_ZOOZ_URL = "https://www.zooz.co.il/about_team.shtml"
+ARI_LINKEDIN_URL = "https://www.linkedin.com/in/ari-manor-878924"
+ARI_FOLLOWUP_SOURCES = [ARI_ZOOZ_URL, ARI_LINKEDIN_URL]
+
+TRIZ_SOURCES = [
+    "https://www.zooz.co.il/personel_services_methods.shtml",
+    "https://www.zooz.co.il/2-Technological-innovation.shtml",
+    "https://www.zooz.co.il/2-Innovation-tools.shtml",
+]
+
 
 def _valid_conversation_id(value):
     if not value or len(value) != 32:
@@ -70,8 +80,11 @@ def _remember_turn(conversation_id, question, answer):
 
 
 def _normalized_short_question(question):
-    q = " ".join((question or "").strip().lower().split())
-    return q.strip(" ?!.,׳'\"״")
+    """Normalize punctuation so natural greetings like 'היי, מה שלומך?' match."""
+    q = (question or "").strip().lower()
+    q = re.sub(r"[?!.,;:׳'\"״()\[\]{}\-–—]+", " ", q)
+    q = " ".join(q.split())
+    return q
 
 
 def _is_smalltalk_question(question):
@@ -129,6 +142,80 @@ def _multiplication_answer():
         "מכפילים אותו ורק לאחר מכן מחפשים ערך שימושי שנוצר — למשל פונקציונליות חדשה, "
         "שיפור בחוויית המשתמש או פתרון לצורך שלא קיבל מענה קודם. המטרה אינה להכפיל סתם, "
         "אלא להשתמש בהכפלה כטריגר לרעיון חדש ומועיל."
+    )
+
+
+def _is_triz_question(question):
+    q = _normalized_short_question(question)
+    return "triz" in q
+
+
+def _triz_answer(question):
+    """Ground a short useful TRIZ answer in official ZOOZ pages."""
+    q = _normalized_short_question(question)
+    workshop_context = "סדנ" in q or "קורס" in q or "הדרכ" in q
+
+    first = (
+        "**TRIZ** היא מתודולוגיה שיטתית לפתרון בעיות המצאתיות, שפותחה על ידי "
+        "גנריך אלטשולר ועמיתיו. לפי חומרי ZOOZ, היא מבוססת על זיהוי דפוסים ועקרונות "
+        "שחוזרים בפתרונות חדשניים, ומשמשת בין היתר לניתוח סתירות ולפיתוח פתרונות "
+        "לבעיות טכנולוגיות מורכבות."
+    )
+
+    if workshop_context:
+        second = (
+            "בהקשר של ZOOZ, TRIZ מופיעה תחת **פיצוח בעיות טכנולוגיות וחדשנות טכנולוגית**. "
+            "המטרה המעשית היא לא רק ללמוד מושגים, אלא להשתמש בעקרונות השיטה כדי לנסח בעיה, "
+            "לזהות את הסתירה המרכזית ולפתח כיווני פתרון באופן שיטתי. אם תרצה, אפשר לשאול "
+            "אותי גם על העקרונות של TRIZ, על אופן היישום שלה או על שירותי ההדרכה והייעוץ "
+            "המתועדים באתר ZOOZ."
+        )
+    else:
+        second = (
+            "מבחינה מעשית, ZOOZ מציגה את TRIZ כחלק מעולם החדשנות הטכנולוגית ופיצוח בעיות: "
+            "מגדירים את הבעיה, מזהים סתירות או אילוצים, ומשתמשים בעקרונות שיטתיים כדי לייצר "
+            "חלופות לפתרון. היא שונה מ-SIT, אך שתיהן משמשות לחשיבה שיטתית על חדשנות."
+        )
+
+    return f"{first}\n\n{second}"
+
+
+def _is_ari_question(question):
+    q = _normalized_short_question(question)
+    return "ארי מנור" in q or "ari manor" in q
+
+
+def _is_more_followup(question):
+    q = _normalized_short_question(question)
+    return q in {
+        "זהו",
+        "רק זה",
+        "יש עוד",
+        "מה עוד",
+        "ומה עוד",
+        "תפרט",
+        "תפרט יותר",
+        "אפשר להרחיב",
+    }
+
+
+def _history_is_about_ari(history):
+    if not history:
+        return False
+    previous = history[-1]
+    combined = f"{previous.get('question', '')} {previous.get('answer', '')}"
+    return _is_ari_question(combined)
+
+
+def _ari_followup_answer():
+    return (
+        "כן. מעבר לפרטים שכבר ציינתי, בפרופיל ה-LinkedIn הציבורי של ארי מנור הוא מציג את עצמו "
+        "כמומחה לאסטרטגיה ושיווק וכמנהל בינלאומי בכיר. תחומי ההתמחות שמופיעים שם כוללים, בין היתר, "
+        "אסטרטגיה, שיווק, מוצר, פיתוח עסקי, ניהול חדשנות, פיתוח מוצרים חדשים, חשיבה המצאתית, "
+        "MarCom, SEO, פעילות B2B ו-B2C וגם פרויקטים בתחום ה-AI.\n\n"
+        "באותו פרופיל מצוין גם ניסיון בתפקידי ניהול בכירים ובפעילות בינלאומית, וכן פעילות כמנטור "
+        "במסגרות האצה. יחד עם המידע באתר ZOOZ, מתקבלת תמונה של מנהל ויועץ שעוסק לא רק בייעוץ שיווקי, "
+        "אלא גם באסטרטגיה, חדשנות, פיתוח עסקי והובלת תהליכים בארגונים."
     )
 
 
@@ -323,6 +410,27 @@ def download_logs():
         return jsonify({"error": "log export failed", "details": str(exc)}), 500
 
 
+def _log_local_response(
+    *,
+    asked_at,
+    conversation_id,
+    question,
+    answer,
+    response_time,
+    sources,
+    status="OK",
+):
+    log_interaction(
+        asked_at=asked_at,
+        conversation_id=conversation_id,
+        question=question,
+        answer=answer,
+        response_time_seconds=response_time,
+        sources=sources,
+        status=status,
+    )
+
+
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.get_json() or {}
@@ -331,6 +439,7 @@ def ask():
         return jsonify({"error": "no question"}), 400
 
     conversation_id = _conversation_id()
+    history = _get_history(conversation_id)
     asked_at = datetime.now(timezone.utc)
     started_at = time.perf_counter()
 
@@ -338,30 +447,29 @@ def ask():
     if _is_smalltalk_question(question):
         answer = "היי! תודה, הכול טוב 😊 איך אפשר לעזור לך בנושא ZOOZ?"
         response_time = time.perf_counter() - started_at
-        log_interaction(
+        _log_local_response(
             asked_at=asked_at,
             conversation_id=conversation_id,
             question=question,
             answer=answer,
-            response_time_seconds=response_time,
+            response_time=response_time,
             sources=[],
             status="OK",
         )
         return _json_response_with_cookie({"answer": answer, "sources": []}, conversation_id)
 
     # The SIT multiplication tool is answered deterministically from official ZOOZ material.
-    # This avoids confusing it with text duplication or with the separate SCAMPER method.
     if _is_multiplication_question(question):
         answer = _multiplication_answer()
         sources = MULTIPLICATION_SOURCES
         response_time = time.perf_counter() - started_at
         _remember_turn(conversation_id, question, answer)
-        log_interaction(
+        _log_local_response(
             asked_at=asked_at,
             conversation_id=conversation_id,
             question=question,
             answer=answer,
-            response_time_seconds=response_time,
+            response_time=response_time,
             sources=sources,
             status="OK",
         )
@@ -370,7 +478,49 @@ def ask():
             conversation_id,
         )
 
-    history = _get_history(conversation_id)
+    # If Ari Manor is the current subject and the user asks for more,
+    # use his public LinkedIn only as a targeted supplemental source.
+    # This does not modify or rebuild the Chroma knowledge base.
+    if _is_more_followup(question) and _history_is_about_ari(history):
+        answer = _ari_followup_answer()
+        sources = ARI_FOLLOWUP_SOURCES
+        response_time = time.perf_counter() - started_at
+        _remember_turn(conversation_id, question, answer)
+        _log_local_response(
+            asked_at=asked_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=answer,
+            response_time=response_time,
+            sources=sources,
+            status="OK",
+        )
+        return _json_response_with_cookie(
+            {"answer": answer, "sources": sources},
+            conversation_id,
+        )
+
+    # TRIZ questions are grounded in direct official ZOOZ pages.
+    # This prevents broad phrasing such as "סדנאות TRIZ" from falling back incorrectly.
+    if _is_triz_question(question):
+        answer = _triz_answer(question)
+        sources = TRIZ_SOURCES
+        response_time = time.perf_counter() - started_at
+        _remember_turn(conversation_id, question, answer)
+        _log_local_response(
+            asked_at=asked_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=answer,
+            response_time=response_time,
+            sources=sources,
+            status="OK",
+        )
+        return _json_response_with_cookie(
+            {"answer": answer, "sources": sources},
+            conversation_id,
+        )
+
     rag_question = _contextualize_question(question, history)
 
     try:
