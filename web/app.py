@@ -18,14 +18,17 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Lightweight in-memory conversation memory.
-# The memory is deliberately conservative: only clear follow-up questions are
-# contextualized. Independent questions are always sent to the RAG unchanged.
 CONVERSATION_COOKIE = "zooz_conversation"
 MAX_CONVERSATIONS = 200
 MAX_TURNS = 1
-MAX_ANSWER_CONTEXT_CHARS = 350
+MAX_ANSWER_CONTEXT_CHARS = 700
 _conversations = OrderedDict()
+
+TEMPORARY_ERROR_PREFIXES = (
+    "אירעה שגיאה טכנית",
+    "אירעה שגיאה זמנית",
+    "השירות עמוס זמנית",
+)
 
 
 def _valid_conversation_id(value):
@@ -62,11 +65,7 @@ def _remember_turn(conversation_id, question, answer):
 
 
 def _looks_like_follow_up(question):
-    """Return True only for questions that clearly depend on prior context.
-
-    We intentionally avoid broad prefixes such as "ומה", "ואיך" or "למה"
-    because they can also start completely new questions.
-    """
+    """Contextualize only follow-ups that clearly depend on the previous turn."""
     q = " ".join((question or "").strip().lower().split())
     if not q:
         return False
@@ -101,32 +100,18 @@ def _looks_like_follow_up(question):
         "ומה עוד לגבי",
         "ומה עוד על",
     )
-
     if q.startswith(explicit_prefixes):
         return True
 
-    # Very short elliptical follow-ups that are meaningless without prior context.
     exact_follow_ups = {
-        "למה?",
-        "למה",
-        "איך?",
-        "איך",
-        "ומה עוד?",
-        "ומה עוד",
-        "תפרט",
-        "תפרט יותר",
-        "אפשר להרחיב?",
-        "אפשר להרחיב",
+        "למה?", "למה", "איך?", "איך", "ומה עוד?", "ומה עוד", "מה עוד?", "מה עוד",
+        "תפרט", "תפרט יותר", "אפשר להרחיב?", "אפשר להרחיב",
+        "זהו?", "זהו", "רק זה?", "רק זה", "יש עוד?", "יש עוד",
     }
-
-    if q in exact_follow_ups:
-        return True
-
-    return False
+    return q in exact_follow_ups
 
 
 def _contextualize_question(question, history):
-    """Attach minimal prior context only when the question is a clear follow-up."""
     if not history or not _looks_like_follow_up(question):
         return question
 
@@ -140,18 +125,12 @@ def _contextualize_question(question, history):
         f"שאלה קודמת: {previous_question}\n"
         f"תשובה קודמת: {previous_answer}\n"
         "השתמש בהקשר רק כדי להבין למה המשתמש מתייחס. "
+        "אם שאלת ההמשך מבקשת עוד מידע (למשל 'זהו?' או 'מה עוד?'), הרחב עם פרטים נוספים ורלוונטיים. "
         "את התשובה עצמה יש לבסס רק על מקורות ZOOZ שהמערכת מאחזרת."
     )
 
 
 def _clean_answer_formatting(answer):
-    """Normalize lightweight Markdown/HTML artifacts before sending to the UI.
-
-    The model occasionally emits Markdown tables, duplicate bullets, literal
-    <br> tags, or unmatched single asterisks. The web client intentionally
-    supports only simple bold text and line breaks, so normalize those artifacts
-    without changing the answer facts.
-    """
     text = str(answer or "")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
@@ -165,20 +144,16 @@ def _clean_answer_formatting(answer):
                 cleaned_lines.append("")
             continue
 
-        # Remove Markdown table separator rows such as |---|---|.
         table_core = line.strip("|").strip()
         if "|" in line and table_core and re.fullmatch(r"[:\-\s|]+", table_core):
             continue
 
-        # Convert Markdown table rows into readable text/bullets.
         if "|" in line:
             cells = [cell.strip() for cell in line.strip("|").split("|") if cell.strip()]
             if len(cells) >= 2:
-                # Replace generic Markdown table headers with a natural section title.
                 if any(label in cells[0] for label in ("תחום", "נושא", "קטגוריה")):
                     cleaned_lines.append("**השירותים המתאימים:**")
                 else:
-                    # Remove only real bullet markers. Keep Markdown **bold** intact.
                     normalized_cells = [
                         re.sub(r"^(?:[•\-]\s*)+", "", cell).strip()
                         for cell in cells
@@ -186,29 +161,26 @@ def _clean_answer_formatting(answer):
                     cleaned_lines.append("• " + " — ".join(normalized_cells))
                 continue
 
-        # Remove a leftover table pipe at the beginning/end of a wrapped line.
         line = line.strip("|").strip()
-
-        # Collapse accidental duplicate bullets such as "• • text" to one bullet.
         line = re.sub(r"^(?:[•]\s*){2,}", "• ", line)
-
         cleaned_lines.append(line)
 
     while cleaned_lines and cleaned_lines[-1] == "":
         cleaned_lines.pop()
 
     result = "\n".join(cleaned_lines)
-
-    # Remove only unmatched/single Markdown asterisks while preserving valid **bold**.
-    # Example: *text* -> text, while **text** remains bold in the web client.
     result = re.sub(r"(?<!\*)\*(?!\*)", "", result)
-
     return result
+
+
+def _is_temporary_error_answer(answer):
+    text = (answer or "").strip()
+    return any(text.startswith(prefix) for prefix in TEMPORARY_ERROR_PREFIXES)
 
 
 def _interaction_status(answer, sources, error=""):
     text = (answer or "").strip()
-    if error or text.startswith("אירעה שגיאה טכנית"):
+    if error or _is_temporary_error_answer(text):
         return "ERROR"
 
     fallback_phrases = (
@@ -280,11 +252,9 @@ def ask():
         response_time = time.perf_counter() - started_at
         status = _interaction_status(answer, sources)
 
-        # Do not make temporary technical failures part of future context.
-        if not (answer or "").startswith("אירעה שגיאה טכנית"):
+        if not _is_temporary_error_answer(answer):
             _remember_turn(conversation_id, question, answer)
 
-        # Logging is best-effort and never blocks the chatbot response.
         log_interaction(
             asked_at=asked_at,
             conversation_id=conversation_id,
@@ -308,8 +278,6 @@ def ask():
 
     except Exception as exc:
         response_time = time.perf_counter() - started_at
-
-        # Even unexpected errors are recorded when logging storage is available.
         log_interaction(
             asked_at=asked_at,
             conversation_id=conversation_id,
@@ -320,7 +288,6 @@ def ask():
             status="ERROR",
             error=str(exc),
         )
-
         return jsonify({"error": str(exc)}), 500
 
 
