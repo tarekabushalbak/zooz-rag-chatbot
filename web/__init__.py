@@ -31,6 +31,10 @@ STRATEGY_SOURCES = [
     "https://www.zooz.co.il/ZOOZ-Workshops-Marketing.pdf",
 ]
 
+COMPETITIVE_STRATEGY_SOURCES = [
+    "https://www.zooz.co.il/marketing_content_strategy.shtml",
+]
+
 TUNNEL_VISION_SOURCES = [
     "https://www.zooz.co.il/marketing_article10.shtml",
 ]
@@ -167,21 +171,20 @@ def _services_answer():
 
 def _is_competitive_strategy_question(query):
     q = _normalize(query)
-    return (
-        "אסטרטגיות תחרותיות" in q
-        or ("אסטרטגיה תחרותית" in q and any(term in q for term in ("מהן", "אילו", "סוגי", "סוגים", "ארבע")))
-    )
+    # Hebrew definite prefixes (e.g. "האסטרטגיות התחרותיות") make exact phrase
+    # matching brittle. Match the semantic stems instead.
+    return "אסטרטג" in q and "תחרות" in q
 
 
 def _competitive_strategy_answer():
     return (
-        "במאגר האסטרטגיה של ZOOZ מופיעים **ארבעה סוגים של אסטרטגיה תחרותית**:\n\n"
-        "1. **אסטרטגיית ערך-מוסף** – להציע ללקוח יותר ערך ולהצדיק העדפה או מחיר גבוהים יותר.\n"
-        "2. **אסטרטגיית נישה** – להתמקד בפלח, צורך או קהל מוגדר.\n"
-        "3. **אסטרטגיית תלות-הדדית** – לבנות יתרון דרך קשרים ותלות הדדית עם גורמים אחרים בשוק.\n"
-        "4. **אסטרטגיית שליטה בעלויות** – לפעול ביעילות שמאפשרת להציע מחיר תחרותי מאוד.\n\n"
-        "אסטרטגיית אוקיינוס כחול/חדשנות-ערך מופיעה באתר כמסגרת אסטרטגית נוספת, אבל היא אינה אחת מארבעת "
-        "הסוגים שמופיעים תחת הכותרת 'ארבעה סוגים של אסטרטגיה תחרותית'."
+        "בעמוד האסטרטגיה של ZOOZ מופיעים **ארבעה סוגים של אסטרטגיה תחרותית**:\n\n"
+        "1. **אסטרטגיית ערך-מוסף** – \"יותר תמורת יותר\".\n"
+        "2. **אסטרטגיית נישה** – \"להתמקד או לא להתמקד\".\n"
+        "3. **אסטרטגיית תלות-הדדית** – \"ערבים זה לזה\".\n"
+        "4. **אסטרטגיית שליטה בעלויות** – \"הכי זול שאפשר\".\n\n"
+        "אלה ארבעת הסוגים שמופיעים באתר תחת הכותרת **'ארבעה סוגים של אסטרטגיה תחרותית'**. "
+        "אסטרטגיית אוקיינוס כחול/חדשנות-ערך מופיעה באתר כמסגרת אסטרטגית נוספת, אך לא כאחד מארבעת הסוגים האלה."
     )
 
 
@@ -335,7 +338,7 @@ def _guarded_ask_zooz(query):
 
     # Specific strategy intents must be checked before the broad strategy-types intent.
     if _is_competitive_strategy_question(query):
-        return _competitive_strategy_answer(), STRATEGY_SOURCES
+        return _competitive_strategy_answer(), COMPETITIVE_STRATEGY_SOURCES
 
     if _is_strategy_types_question(query):
         return _strategy_types_answer(), STRATEGY_SOURCES
