@@ -36,6 +36,8 @@ CONTACT_URL = "https://www.zooz.co.il/contact.shtml"
 CONTACT_EMAIL = "info@zooz.co.il"
 CONTACT_PHONE = "09-9585085"
 MODEL = "openai/gpt-oss-20b"
+FALLBACK_MODEL = "openai/gpt-oss-120b"
+MAX_COMPLETION_TOKENS = 550
 
 
 @lru_cache(maxsize=1)
@@ -57,6 +59,7 @@ def get_groq_client():
 
 
 def log_to_csv(question, answer, duration):
+    """Keep the lightweight local log as a best-effort secondary log."""
     try:
         log_file = "logs.csv"
         file_exists = os.path.isfile(log_file)
@@ -90,45 +93,21 @@ def _normalized_question(query):
 
 
 def _is_mixed_pricing_question(query):
-    """Detect questions where price is only one part of a broader request.
-
-    A mixed question must not be collapsed into the safe pricing fallback because
-    the other answerable parts (value, timeline, facilitator, service fit, etc.)
-    should still be answered from the corpus.
-    """
     q = _normalized_question(query)
     pricing_terms = ("כמה עולה", "כמה עולים", "מה המחיר", "מחיר", "מחירים", "עלות", "תמחור")
     if not any(term in q for term in pricing_terms):
         return False
 
     broader_markers = (
-        "לוח זמנים",
-        "כמה זמן",
-        "מי יעביר",
-        "מי ינחה",
-        "מי מעביר",
-        "תוצאות מובטחות",
-        "תוצאה מובטחת",
-        "מה הערך",
-        "איזה חלק",
-        "אילו חלקים",
-        "איזה מידע",
-        "האם עדיין",
-        "גם אם",
-        "אם אין",
-        "אם לא",
-        "ובנוסף",
-        "וגם",
+        "לוח זמנים", "כמה זמן", "מי יעביר", "מי ינחה", "מי מעביר",
+        "תוצאות מובטחות", "תוצאה מובטחת", "מה הערך", "איזה חלק",
+        "אילו חלקים", "איזה מידע", "האם עדיין", "גם אם", "אם אין",
+        "אם לא", "ובנוסף", "וגם",
     )
-    return (
-        any(marker in q for marker in broader_markers)
-        or q.count("?") > 1
-        or q.count(",") >= 2
-    )
+    return any(marker in q for marker in broader_markers) or q.count("?") > 1 or q.count(",") >= 2
 
 
 def _strip_pricing_terms(query):
-    """Remove pricing trigger words only for retrieval of mixed questions."""
     cleaned = re.sub(
         r"כמה\s+עולה|כמה\s+עולים|מה\s+המחיר|מחיר(?:ים)?|עלות|תמחור",
         " ",
@@ -140,39 +119,61 @@ def _strip_pricing_terms(query):
 
 
 def _is_company_inference_question(query):
-    """Identify broad evidence-based questions about what can be inferred about ZOOZ."""
     q = _normalized_question(query)
     inference_markers = (
-        "מה אפשר להסיק",
-        "מה ניתן להסיק",
-        "מה אפשר ללמוד",
-        "מה ניתן ללמוד",
-        "מסקנה אחת",
-        "מסקנה חזקה",
-        "איזו מסקנה",
-        "איזה יתרון אפשר",
+        "מה אפשר להסיק", "מה ניתן להסיק", "מה אפשר ללמוד", "מה ניתן ללמוד",
+        "מסקנה אחת", "מסקנה חזקה", "איזו מסקנה", "איזה יתרון אפשר",
     )
     if not any(marker in q for marker in inference_markers):
         return False
 
-    # Keep clearly specific intents on their dedicated evidence paths.
-    specific_intent_terms = (
-        "לקוחות",
-        "לקוח",
-        "triz",
-        "ארי מנור",
-        "טלפון",
-        "אימייל",
-        "מייל",
-        "כתובת",
-        "מחיר",
-        "עלות",
+    specific_terms = (
+        "לקוחות", "לקוח", "triz", "ארי מנור", "טלפון", "אימייל",
+        "מייל", "כתובת", "מחיר", "עלות",
     )
-    return not any(term in q for term in specific_intent_terms)
+    return not any(term in q for term in specific_terms)
+
+
+def _is_inventive_tools_question(query):
+    q = _normalized_question(query)
+    return any(term in q for term in (
+        "כלי החשיבה ההמצאתית",
+        "כלי חשיבה המצאתית",
+        "כלי-חשיבה המצאתית",
+        "שישה כלי חשיבה",
+        "ששת כלי החשיבה",
+    ))
+
+
+def _is_multiplication_tool_question(query):
+    q = _normalized_question(query)
+    return any(term in q for term in (
+        "מה זה הכפלה",
+        "מהי הכפלה",
+        "איך מבצעים הכפלה",
+        "איך עושים הכפלה",
+        "כלי הכפלה",
+        "הכפל מרכיב",
+        "הכפלה?",
+    )) or q.strip(' ?!.׳"״') == "הכפלה" or (_is_inventive_tools_question(query) and "הכפלה" in q)
+
+
+def _is_geographic_clients_question(query):
+    q = _normalized_question(query)
+    geography_terms = (
+        "באיזה ארצות", "באילו ארצות", "איזה ארצות", "באיזה מדינות", "באילו מדינות",
+        "איזה מדינות", "בחו\"ל", "בחו״ל", "בעולם", "מחוץ לישראל", "הונג קונג",
+    )
+    work_terms = ("עבד", "עובד", "לקוחות", "לקוח", "פרויקט", "פעילות")
+    return any(term in q for term in geography_terms) and any(term in q for term in work_terms)
+
+
+def _is_positioning_question(query):
+    q = _normalized_question(query)
+    return "מיצוב" in q
 
 
 def _merge_ranked_results(*groups, limit=12):
-    """Merge retrieval passes while keeping order and removing duplicate chunks."""
     merged = []
     seen = set()
     for group in groups:
@@ -189,52 +190,92 @@ def _merge_ranked_results(*groups, limit=12):
 
 
 def _unsupported_fact_response(query):
-    """Reject known high-risk unsupported premises without asking the LLM to guess.
-
-    These patterns are company facts that the current ZOOZ corpus does not document
-    authoritatively. Returning a grounded fallback is safer than letting incidental
-    mentions in old articles/newsletters turn into a fabricated company claim.
-    """
-    q = " ".join((query or "").lower().split())
-
+    q = _normalized_question(query)
     risky_patterns = (
-        "erp",
-        "שירות התשלומים",
-        "שירותי תשלומים",
-        "פרס נובל",
-        "כמה עובדים",
-        "מספר העובדים",
-        "הכנסות השנתיות",
-        "מה ההכנסות",
-        "כמה סניפים",
-        "מספר סניפים",
-        "תמציא לי",
-        "לא מופיעה באתר",
-        "לא מופיע באתר",
+        "erp", "שירות התשלומים", "שירותי תשלומים", "פרס נובל", "כמה עובדים",
+        "מספר העובדים", "הכנסות השנתיות", "מה ההכנסות", "כמה סניפים",
+        "מספר סניפים", "תמציא לי", "לא מופיעה באתר", "לא מופיע באתר",
     )
-
     if any(pattern in q for pattern in risky_patterns):
         return (
             "אין לי מידע במקורות של ZOOZ שמאשר את הפרט או ההנחה שבשאלה, "
             "ולכן לא אמציא תשובה."
         )
-
     return ""
 
 
+def _is_rate_limit_error(exc):
+    status = getattr(exc, "status_code", None)
+    text = str(exc).lower()
+    return status == 429 or "rate limit" in text or "rate_limit_exceeded" in text
+
+
+def _create_completion(client, prompt):
+    """Use the main model and fail over to a second Groq model on a 429 limit."""
+    common = {
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "max_tokens": MAX_COMPLETION_TOKENS,
+    }
+
+    try:
+        return client.chat.completions.create(
+            model=MODEL,
+            reasoning_effort="low",
+            include_reasoning=False,
+            **common,
+        )
+    except Exception as exc:
+        if not _is_rate_limit_error(exc):
+            raise
+        print(f"Primary Groq model rate-limited; trying fallback model: {repr(exc)}")
+        return client.chat.completions.create(
+            model=FALLBACK_MODEL,
+            **common,
+        )
+
+
 def curate_results_for_answer(ranked_results, query):
-    """Prefer authoritative ZOOZ pages for intents where noisy legacy content exists."""
+    """Prefer authoritative/direct ZOOZ sources for sensitive or noisy intents."""
     if not ranked_results:
         return []
 
     intent = classify_query(query)
 
-    if _is_company_inference_question(query):
-        preferred_paths = [
-            "/about_profile.shtml",
-            "/about.shtml",
-            "/personel.shtml",
+    if _is_inventive_tools_question(query) or _is_multiplication_tool_question(query):
+        priority_markers = (
+            "/marketing_article3.shtml",
+            "/marketing_article3a.shtml",
+            "/marketing_article3b.shtml",
+            "/marketing_article3c.shtml",
+            "/2-innovation-tools.shtml",
+            "/2-product-innovation.shtml",
+            "/personel_article24.shtml",
+            "/workshops_marketing.shtml",
+            "/zooz-workshops-innovation.pdf",
+        )
+        direct = [
+            item for item in ranked_results
+            if any(marker in _item_path(item) for marker in priority_markers)
         ]
+        return (direct or ranked_results)[:5]
+
+    if _is_geographic_clients_question(query):
+        direct = [
+            item for item in ranked_results
+            if any(marker in _item_path(item) for marker in ("news_clients", "about_clients", "clients"))
+        ]
+        return (direct or ranked_results)[:5]
+
+    if _is_positioning_question(query):
+        direct = [
+            item for item in ranked_results
+            if "marketing" in _item_path(item) or "lazooz" in _item_path(item)
+        ]
+        return (direct or ranked_results)[:5]
+
+    if _is_company_inference_question(query):
+        preferred_paths = ["/about_profile.shtml", "/about.shtml", "/personel.shtml"]
         preferred = []
         for path in preferred_paths:
             preferred.extend(item for item in ranked_results if _item_path(item) == path)
@@ -246,11 +287,8 @@ def curate_results_for_answer(ranked_results, query):
             path = _item_path(item)
             if "/lazooz/" in path or "_article" in path or "/news" in path:
                 continue
-            if any(marker in path for marker in [
-                "services", "innovation", "marketing", "personel", "clients", "about"
-            ]):
+            if any(marker in path for marker in ("services", "innovation", "marketing", "personel", "clients", "about")):
                 direct_pages.append(item)
-
         selected = _merge_ranked_results(preferred, direct_pages, limit=5)
         return selected or ranked_results[:5]
 
@@ -259,41 +297,38 @@ def curate_results_for_answer(ranked_results, query):
         return contact[:1] if contact else ranked_results[:2]
 
     if intent == "team":
-        canonical = [item for item in ranked_results if _item_path(item) == "/about_team.shtml"]
+        preferred_paths = (
+            "/about_team.shtml",
+            "/marketing_article13.shtml",
+            "/lazooz/lazooz89.html",
+            "/marketing-training.pdf",
+        )
+        preferred = []
+        for path in preferred_paths:
+            preferred.extend(item for item in ranked_results if _item_path(item) == path)
         direct = [
             item for item in ranked_results
-            if _contains_person_name(item) and _item_path(item) != "/about_team.shtml"
+            if _contains_person_name(item) and item not in preferred
         ]
-        selected = canonical + direct
-        return (selected or ranked_results)[:3]
+        return (_merge_ranked_results(preferred, direct, limit=4) or ranked_results[:4])
 
     if intent == "services_overview":
-        preferred_paths = [
-            "/about_profile.shtml",
-            "/about.shtml",
-            "/personel.shtml",
-        ]
+        preferred_paths = ["/about_profile.shtml", "/about.shtml", "/personel.shtml"]
         preferred = []
         for path in preferred_paths:
             preferred.extend(item for item in ranked_results if _item_path(item) == path)
         service_pages = [
             item for item in ranked_results
-            if item not in preferred
-            and (
-                "services" in _item_path(item)
-                or "personel" in _item_path(item)
-                or "marketing" in _item_path(item)
-            )
+            if item not in preferred and any(marker in _item_path(item) for marker in ("services", "personel", "marketing"))
         ]
-        selected = preferred + service_pages
-        return (selected or ranked_results)[:4]
+        return (_merge_ranked_results(preferred, service_pages, limit=5) or ranked_results[:5])
 
     if intent == "clients":
-        direct_client_pages = [
+        direct = [
             item for item in ranked_results
-            if any(marker in _item_path(item) for marker in ["news_clients", "about_clients", "clients"])
+            if any(marker in _item_path(item) for marker in ("news_clients", "about_clients", "clients"))
         ]
-        return (direct_client_pages or ranked_results)[:4]
+        return (direct or ranked_results)[:5]
 
     if intent in {"triz", "systematic_innovation"}:
         direct = [
@@ -302,9 +337,10 @@ def curate_results_for_answer(ranked_results, query):
                 "/marketing_article14.shtml",
                 "/2-innovation-methods.shtml",
                 "/marketing_content_innovation.shtml",
+                "/2-innovation-tools.shtml",
             }
         ]
-        return (direct or ranked_results)[:4]
+        return (direct or ranked_results)[:5]
 
     return ranked_results[:5]
 
@@ -314,53 +350,81 @@ def response_guidance(query):
 
     if _is_mixed_pricing_question(query):
         return (
-            "השאלה כוללת כמה רכיבים, והמחיר הוא רק אחד מהם. ענה לכל רכיב בנפרד. "
-            "אם אין במקורות מחיר, לוח זמנים, תוצאה מובטחת או פרט אחר — ציין שאין מידע מדויק רק לגבי אותו רכיב, "
-            "אבל המשך לענות על שאר הרכיבים שניתנים למענה מהמקורות. אל תהפוך את כל התשובה להפניית קשר."
+            "השאלה כוללת כמה רכיבים. ענה לכל רכיב בנפרד. אם אין במקורות מחיר, לוח זמנים, "
+            "תוצאה מובטחת או פרט אחר, ציין שחסר מידע רק לגבי אותו רכיב והמשך לענות על השאר."
+        )
+
+    if _is_inventive_tools_question(query):
+        return (
+            "השאלה היא על כלי החשיבה ההמצאתית. תן תשובה שימושית ולא רק שמות: פתח בהסבר קצר על SIT, "
+            "לאחר מכן הצג את ששת הכלים שמופיעים במקורות — הכפלה, חלוקה, החסרה, איחוד, הוספת מימד "
+            "והתאמה לסביבה — ובמשפט קצר הסבר מה עושה כל כלי. אל תחליף כלי אחד באחר ואל תחזור על אותו כלי."
+        )
+
+    if _is_multiplication_tool_question(query):
+        return (
+            "השאלה היא על כלי החשיבה 'הכפלה'. הסבר במפורש שהפעולה היא לבחור מרכיב קיים במוצר או בשירות, "
+            "להכפיל אותו (אפשר גם עם שינוי), ואז לבחון איזו תועלת חדשה נוצרת. תן דוגמה קונקרטית מן המקורות "
+            "והסבר מה התועלת בדוגמה. אל תפרש 'הכפלה' כהכפלת טקסט או מסמך."
+        )
+
+    if _is_geographic_clients_question(query):
+        return (
+            "השאלה היא על מדינות/אזורים שבהם ZOOZ עבדה. השתמש בעמודי לקוחות ופרויקטים ישירים. "
+            "ציין רק מקומות שמופיעים במפורש במקורות, אל תטען שהלקוחות בישראל בלבד אם יש עדות לפעילות בחו\"ל, "
+            "והבהר שהרשימה מבוססת על הדוגמאות המתועדות באתר ואינה בהכרח רשימה מלאה."
+        )
+
+    if _is_positioning_question(query):
+        return (
+            "השאלה היא על מיצוב. הסבר מהו המושג, למה הוא חשוב, ואיך הוא משפיע מעשית על בידול, מסר שיווקי, "
+            "בחירת קהל או החלטות שיווקיות — רק ככל שהמקורות תומכים בכך. תן דוגמה אם יש במקור."
         )
 
     if _is_company_inference_question(query):
         return (
-            "השאלה מבקשת מסקנה ברמת החברה. הסתמך קודם על דפי אודות, פרופיל החברה ושירותים ישירים, "
-            "ורק אחר כך על עמודי תחום או לקוחות. הפרד במפורש בין עובדה שמופיעה במקור לבין מסקנה סבירה, "
-            "ואל תבסס מסקנה מרכזית על עלון או מאמר ישן כשיש מקור חברה ישיר."
+            "השאלה מבקשת מסקנה ברמת החברה. הסתמך קודם על דפי אודות, פרופיל החברה ושירותים ישירים. "
+            "הפרד במפורש בין עובדה שמופיעה במקור לבין מסקנה סבירה, ואל תבסס מסקנה מרכזית על עלון ישן "
+            "כשיש מקור חברה ישיר."
         )
 
     if intent == "team":
         return (
-            "השאלה היא על אדם/צוות. פתח בתפקיד הנוכחי שלו ב-ZOOZ. "
-            "ענה ב-2 עד 4 משפטים בלבד. אל תעמיס רשימת לקוחות, פרויקטים או חברות עבר."
+            "השאלה היא על אדם/צוות. תן פרופיל שימושי ב-2–3 פסקאות קצרות: תפקיד נוכחי, תחומי מומחיות, "
+            "ורקע/פעילות מקצועית רלוונטית שמופיעים במקורות. אל תסתפק במשפט אחד, אבל גם אל תמציא פרטים."
         )
 
     if intent == "services_overview":
         return (
-            "השאלה היא על שירותי החברה באופן כללי. הסתמך בראש ובראשונה על דף פרופיל החברה/אודות. "
-            "סכם את תחומי-העל בלבד: אסטרטגיה, שיווק וחדשנות; וכן ייעוץ ופיתוח ארגוני, "
-            "אימון עסקי ופיתוח מנהלים ועובדים."
+            "השאלה היא על שירותי החברה באופן כללי. הסתמך בראש ובראשונה על פרופיל החברה/אודות. "
+            "הצג את תחומי-העל, ואז הוסף הסבר קצר מה הערך או המטרה של כל תחום כדי שהתשובה תהיה שימושית."
         )
 
     if intent == "contact":
-        return "השאלה היא על יצירת קשר. תן רק את פרטי הקשר הישירים, בלי הרחבות."
+        return "השאלה היא על יצירת קשר. תן רק את פרטי הקשר הישירים, בלי הרחבות מיותרות."
 
     if intent == "clients":
         return (
-            "השאלה היא על לקוחות או ארגונים שעבדו עם ZOOZ. השתמש רק בעמודי לקוחות/פרויקטים ישירים. "
-            "אל תציג כחלק מלקוחות ZOOZ חברות שמופיעות רק ברקע התעסוקתי של יועץ או עובד."
+            "השאלה היא על לקוחות או ארגונים שעבדו עם ZOOZ. השתמש רק בעמודי לקוחות/פרויקטים ישירים, "
+            "ואל תציג כחלק מהלקוחות חברות שמופיעות רק ברקע תעסוקתי של יועץ."
         )
 
     if intent == "triz":
         return (
-            "השאלה היא על TRIZ. אל תטען ש-ZOOZ פיתחה את TRIZ או את I-TRIZ אלא אם המקור אומר זאת במפורש. "
-            "הפרד בין המתודולוגיה עצמה לבין האופן שבו ZOOZ עבדה עם מומחי/פתרונות TRIZ או ייצגה גורם חיצוני."
+            "השאלה היא על TRIZ. אל תטען ש-ZOOZ פיתחה את TRIZ או את I-TRIZ אלא אם מקור אומר זאת במפורש. "
+            "הסבר את ההקשר לשירותי ZOOZ רק על בסיס המקורות."
         )
 
     if intent == "systematic_innovation":
         return (
-            "השאלה היא על שיטות חדשנות. ציין רק שיטות שהמקורות אומרים במפורש ש-ZOOZ משתמשת בהן, מלמדת אותן "
-            "או מציעה במסגרת שירותיה. אל תסיק שרשימת מושגים כללית היא רשימת שיטות ש-ZOOZ מלמדת."
+            "השאלה היא על חדשנות שיטתית. הסבר את הרעיון, איך הוא מיושם בפועל ולמה משתמשים בו, "
+            "ורק אז ציין שיטות או כלים שהמקורות אומרים במפורש ש-ZOOZ משתמשת בהם או מלמדת אותם."
         )
 
-    return "ענה ישירות לשאלה ואל תוסיף פרטים שאינם נחוצים למענה."
+    return (
+        "ענה ישירות ובצורה שימושית. ברירת המחדל היא 2–3 פסקאות קצרות: קודם תשובה ישירה, אחר כך הקשר/משמעות, "
+        "ולבסוף יישום, דוגמה או צעד מעשי אם המקורות מאפשרים. אם אין מספיק מידע במקורות, אל תאריך בכוח ואל תמציא."
+    )
 
 
 def _trim_context(text):
@@ -376,13 +440,11 @@ def _trim_context(text):
 def build_context(ranked_results):
     parts = []
     sources = []
-
     for index, item in enumerate(ranked_results, start=1):
-        document = _trim_context(item["document"])
-        metadata = item["metadata"]
+        document = _trim_context(item.get("document", ""))
+        metadata = item.get("metadata") or {}
         url = metadata.get("url", "")
         title = metadata.get("title", "")
-
         parts.append(
             f"מקור {index}\n"
             f"כותרת: {title}\n"
@@ -391,12 +453,10 @@ def build_context(ranked_results):
         )
         if url and url not in sources:
             sources.append(url)
-
     return "\n\n---\n\n".join(parts), sources
 
 
 def has_current_pricing_evidence(ranked_results):
-    """Accept a quoted ZOOZ service price only from an explicit pricing source."""
     explicit_price_terms = ("מחיר", "מחירים", "תמחור", "pricing", "price")
     currency_or_amount = re.compile(r"(?:₪|ש\"ח|שח|\$|€|\b\d+[\d,.]*\b)")
 
@@ -417,13 +477,47 @@ def has_current_pricing_evidence(ranked_results):
             or "pricing" in path
             or any(term in title_l for term in explicit_price_terms)
         )
-        if not explicit_source:
-            continue
-
-        if any(term in combined for term in explicit_price_terms) and currency_or_amount.search(combined):
+        if explicit_source and any(term in combined for term in explicit_price_terms) and currency_or_amount.search(combined):
             return True
-
     return False
+
+
+def _augment_retrieval(collection, ranked, query, intent, mixed_pricing, company_inference):
+    extra_queries = []
+
+    if company_inference or mixed_pricing:
+        extra_queries.append("אודות ZOOZ פרופיל החברה שירותים ייעוץ והדרכה")
+
+    if intent == "team":
+        extra_queries.append("ארי מנור מנכ״ל ZOOZ יועץ שיווקי אסטרטגיה חדשנות סדנאות ניסיון מקצועי")
+
+    if _is_inventive_tools_question(query):
+        extra_queries.append(
+            "חשיבה המצאתית שישה כלי חשיבה הכפלה חלוקה החסרה איחוד הוספת מימד התאמה לסביבה"
+        )
+
+    if _is_multiplication_tool_question(query):
+        extra_queries.append(
+            "הכפלה כלי חשיבה המצאתית לבחור מרכיב להכפיל אותו למצוא תועלת מוצר שירות"
+        )
+
+    if _is_geographic_clients_question(query):
+        extra_queries.append("לקוחות ZOOZ פרויקטים בחו״ל בעולם הונג קונג פעילות בינלאומית")
+
+    if _is_positioning_question(query):
+        extra_queries.append("מיצוב שיווקי בידול אסטרטגיה שיווקית ZOOZ מהו למה חשוב")
+
+    merged = ranked
+    for extra_query in extra_queries:
+        extra_ranked = query_collection(
+            collection,
+            extra_query,
+            candidate_k=RETRIEVAL_CANDIDATES,
+            top_k=CONTEXT_CHUNKS,
+        )
+        merged = _merge_ranked_results(merged, extra_ranked, limit=14)
+
+    return merged
 
 
 def ask_zooz(query):
@@ -457,7 +551,6 @@ def ask_zooz(query):
             return answer, [CONTACT_URL]
 
         collection = load_collection()
-
         retrieval_query = _strip_pricing_terms(query) if mixed_pricing else query
         ranked = query_collection(
             collection,
@@ -465,18 +558,14 @@ def ask_zooz(query):
             candidate_k=RETRIEVAL_CANDIDATES,
             top_k=CONTEXT_CHUNKS,
         )
-
-        # Broad inference and mixed multi-part questions benefit from a second,
-        # authoritative pass so company profile/service pages cannot be crowded out
-        # by old newsletters or incidental article matches.
-        if company_inference or mixed_pricing:
-            canonical_ranked = query_collection(
-                collection,
-                "אודות ZOOZ פרופיל החברה שירותים ייעוץ והדרכה",
-                candidate_k=RETRIEVAL_CANDIDATES,
-                top_k=CONTEXT_CHUNKS,
-            )
-            ranked = _merge_ranked_results(ranked, canonical_ranked, limit=12)
+        ranked = _augment_retrieval(
+            collection,
+            ranked,
+            query,
+            intent,
+            mixed_pricing,
+            company_inference,
+        )
 
         if is_pricing_query(query) and not mixed_pricing and not has_current_pricing_evidence(ranked):
             answer = (
@@ -493,20 +582,21 @@ def ask_zooz(query):
 
         prompt = f"""אתה העוזר הווירטואלי של חברת ZOOZ.
 
-ענה רק על בסיס המקורות שסופקו מאתר ZOOZ. המטרה העליונה היא דיוק.
+ענה רק על בסיס המקורות שסופקו מאתר ZOOZ. המטרה העליונה היא דיוק, אך התשובה צריכה גם להיות שימושית למשתמש.
 
 כללים:
-1. ענה בעברית, קצר וברור.
-2. אל תשתמש בידע חיצוני ואל תשלים פרטים חסרים מהשערה.
-3. עובדה ספציפית כמו מחיר, שם, תפקיד, לקוח, תאריך, מספר או שירות מותרת רק אם היא מופיעה במפורש במקורות.
-4. אם העובדה המדויקת לא מופיעה, אמור שאין לך מידע מדויק עליה במקורות של ZOOZ.
-5. אל תאשר הנחה לא נתמכת ואל תמציא שירותים, לקוחות, מחירים או נתונים.
-6. העדף דפי אודות, שירותים, צוות, קשר ועמודי תחום על פני אזכורים מקריים במאמרים ישנים.
-7. אל תענה על נושאים שאינם קשורים ל-ZOOZ.
-8. אל תזכיר ציוני retrieval או פרטים פנימיים של המערכת.
+1. ענה בעברית ברורה וטבעית. ברירת המחדל היא 2–3 פסקאות קצרות ומשמעותיות, לא שורה אחת בלבד.
+2. בשאלה על מושג, כלי, שירות או אדם: תן קודם תשובה ישירה, אחר כך הקשר/משמעות, ולבסוף יישום, דוגמה או רקע שימושי אם המקורות תומכים בכך.
+3. אל תשתמש בידע חיצוני ואל תשלים פרטים חסרים מהשערה.
+4. עובדה ספציפית כמו מחיר, שם, תפקיד, לקוח, תאריך, מספר או שירות מותרת רק אם היא מופיעה במפורש במקורות.
+5. אם העובדה המדויקת לא מופיעה, אמור שאין לך מידע מדויק עליה במקורות של ZOOZ.
+6. אל תאשר הנחה לא נתמכת ואל תמציא שירותים, לקוחות, מחירים או נתונים.
+7. העדף דפי אודות, שירותים, צוות, קשר, לקוחות ועמודי תחום ישירים על פני אזכורים מקריים במאמרים או עלונים ישנים.
+8. אל תענה על נושאים שאינם קשורים ל-ZOOZ ואל תזכיר ציוני retrieval או פרטים פנימיים של המערכת.
 9. מחיר שמופיע במאמר/עלון/דוגמה ישנה אינו מחירון שירותי ZOOZ.
-10. ענה רק למה שנשאל ואל תעמיס פרטים צדדיים.
-11. אם השאלה כוללת כמה חלקים, ענה לכל חלק. אם חסר מידע לגבי חלק אחד, ציין זאת רק לגבי אותו חלק והמשך לענות על שאר החלקים על בסיס המקורות.
+10. אם השאלה כוללת כמה חלקים, ענה לכל חלק. אם חסר מידע לגבי חלק אחד, ציין זאת רק לגבי אותו חלק והמשך לענות על שאר החלקים.
+11. אל תאריך בכוח: אם המקורות אינם תומכים בפרטים נוספים, עדיף להיות קצר ומדויק מאשר להמציא.
+12. כשאפשר, תן למשתמש \"מה עושים עם המידע\" — צעד, שימוש, דוגמה או תועלת — אך רק אם הדבר מבוסס במקורות.
 
 מיקוד לשאלה:
 {guidance}
@@ -520,15 +610,7 @@ def ask_zooz(query):
 תשובה:"""
 
         client = get_groq_client()
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=400,
-            reasoning_effort="low",
-            include_reasoning=False,
-        )
-
+        response = _create_completion(client, prompt)
         answer = (response.choices[0].message.content or "").strip()
         if not answer:
             raise RuntimeError("Groq returned empty answer content")
@@ -540,7 +622,10 @@ def ask_zooz(query):
     except Exception as exc:
         duration = round(time.time() - start_time, 2)
         print(f"CHATBOT ERROR: {repr(exc)}")
-        error_msg = "אירעה שגיאה טכנית. אנא נסה שוב או פנה ל-info@zooz.co.il"
+        if _is_rate_limit_error(exc):
+            error_msg = "השירות עמוס זמנית בגלל מגבלת שימוש. אפשר לנסות שוב בעוד כמה דקות."
+        else:
+            error_msg = "אירעה שגיאה זמנית בשירות. אנא נסה שוב בעוד רגע."
         log_to_csv(query, f"ERROR: {exc}", duration)
         return error_msg, []
 
