@@ -10,6 +10,7 @@ import re
 from scripts import rag_engine as _rag_engine
 
 _ORIGINAL_ASK_ZOOZ = _rag_engine.ask_zooz
+_ORIGINAL_RESPONSE_GUIDANCE = _rag_engine.response_guidance
 
 ARI_SOURCES = [
     "https://www.zooz.co.il/about_team.shtml",
@@ -172,6 +173,19 @@ def _systematic_innovation_answer(query):
     )
 
 
+def _guarded_response_guidance(query):
+    """Add global anti-mixing rules to every normal RAG answer."""
+    base = _ORIGINAL_RESPONSE_GUIDANCE(query)
+    return (
+        f"{base}\n"
+        "כללי דיוק נוספים: אל תערבב פרטים השייכים לקטגוריות שונות רק מפני שהם הופיעו יחד בתוצאות החיפוש. "
+        "כאשר יש ציר זמן, שמור במפורש על ההבחנה בין תפקיד נוכחי, פעילות בשנים האחרונות ותפקידים בעבר, "
+        "ואל תסיק סדר כרונולוגי שהמקור אינו קובע. כאשר נשאלת על רשימה או סוגים, כלול רק פריטים שהמקור "
+        "מגדיר כחלק מאותה קטגוריה; אל תהפוך דוגמה, מודל או מושג סמוך לסוג נוסף. העדף עמוד רשמי ומרכזי "
+        "על פני דוגמה מקרית מתוך עלון או פרויקט ישן."
+    )
+
+
 def _guarded_ask_zooz(query):
     if _is_ari_profile_question(query):
         return _ari_profile_answer(), ARI_SOURCES
@@ -191,4 +205,5 @@ def _guarded_ask_zooz(query):
     return _ORIGINAL_ASK_ZOOZ(query)
 
 
+_rag_engine.response_guidance = _guarded_response_guidance
 _rag_engine.ask_zooz = _guarded_ask_zooz
