@@ -6,11 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
             font-family: 'Segoe UI', Arial, sans-serif;
@@ -29,21 +25,9 @@
             color: white;
         }
 
-        .header h1 {
-            font-size: 26px;
-            font-weight: 700;
-            letter-spacing: 1px;
-        }
-
-        .header h1 span {
-            color: #4fc3f7;
-        }
-
-        .header p {
-            font-size: 13px;
-            opacity: 0.75;
-            margin-top: 4px;
-        }
+        .header h1 { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+        .header h1 span { color: #4fc3f7; }
+        .header p { font-size: 13px; opacity: 0.75; margin-top: 4px; }
 
         .online-dot {
             display: inline-block;
@@ -55,10 +39,7 @@
             animation: pulse 2s infinite;
         }
 
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
         .chat-wrapper {
             flex: 1;
@@ -81,36 +62,44 @@
             border-radius: 16px;
             padding: 22px;
             min-height: 420px;
-            max-height: 480px;
+            max-height: 520px;
             overflow-y: auto;
             box-shadow: 0 8px 32px rgba(0,0,0,0.3);
         }
 
-        .messages::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .messages::-webkit-scrollbar-thumb {
-            background: #ccc;
-            border-radius: 3px;
-        }
+        .messages::-webkit-scrollbar { width: 6px; }
+        .messages::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
 
         .welcome {
             text-align: center;
             color: #888;
-            padding: 30px 0 10px;
+            padding: 22px 0 10px;
         }
 
         .welcome .avatar {
-            font-size: 48px;
-            margin-bottom: 10px;
+            min-height: 64px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        .welcome p {
-            font-size: 15px;
-            line-height: 1.7;
-            color: #555;
+        .welcome .avatar img {
+            display: block;
+            max-width: 150px;
+            max-height: 62px;
+            object-fit: contain;
         }
+
+        .logo-fallback {
+            display: none;
+            color: #163b5b;
+            font-size: 34px;
+            font-weight: 800;
+            letter-spacing: 2px;
+        }
+
+        .welcome p { font-size: 15px; line-height: 1.7; color: #555; }
 
         .user-msg {
             background: linear-gradient(135deg, #1a3a5c, #0d5c8a);
@@ -129,27 +118,24 @@
         .bot-msg {
             background: #f5f7fa;
             color: #2c3e50;
-            padding: 12px 16px;
+            padding: 14px 16px;
             border-radius: 18px 18px 18px 4px;
             margin: 8px 0;
-            max-width: 82%;
+            max-width: 86%;
             float: left;
             clear: both;
-            line-height: 1.7;
+            line-height: 1.75;
             font-size: 14px;
             border-right: 3px solid #4fc3f7;
             box-shadow: 0 2px 8px rgba(0,0,0,0.07);
         }
 
-        .bot-msg strong {
-            font-weight: 700;
-            color: #183b59;
-        }
+        .bot-msg strong { font-weight: 700; color: #183b59; }
 
         .sources {
             font-size: 12px;
             color: #999;
-            margin-top: 10px;
+            margin-top: 12px;
             padding-top: 8px;
             border-top: 1px solid #e8e8e8;
             display: flex;
@@ -158,10 +144,7 @@
             align-items: center;
         }
 
-        .sources-label {
-            color: #999;
-            margin-left: 2px;
-        }
+        .sources-label { color: #999; margin-left: 2px; }
 
         .sources a {
             display: inline-block;
@@ -174,20 +157,10 @@
             transition: all 0.2s;
         }
 
-        .sources a:hover {
-            background: #d8f1fc;
-            text-decoration: none;
-        }
+        .sources a:hover { background: #d8f1fc; text-decoration: none; }
+        .clearfix { clear: both; }
 
-        .clearfix {
-            clear: both;
-        }
-
-        .suggestions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
+        .suggestions { display: flex; flex-wrap: wrap; gap: 8px; }
 
         .suggestion-btn {
             background: rgba(255,255,255,0.12);
@@ -206,14 +179,11 @@
             transform: translateY(-1px);
         }
 
-        .input-row {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
+        .input-row { display: flex; gap: 10px; align-items: center; }
 
         .input-row input {
             flex: 1;
+            min-width: 0;
             padding: 13px 18px;
             border: none;
             border-radius: 25px;
@@ -224,8 +194,32 @@
             box-shadow: 0 4px 16px rgba(0,0,0,0.2);
         }
 
-        .input-row input::placeholder {
-            color: #aaa;
+        .input-row input::placeholder { color: #aaa; }
+
+        .mic-btn {
+            width: 46px;
+            height: 46px;
+            flex: 0 0 46px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255,255,255,0.45);
+            border-radius: 50%;
+            background: rgba(255,255,255,0.14);
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+            transition: all 0.2s;
+        }
+
+        .mic-btn:hover { background: rgba(255,255,255,0.24); transform: translateY(-1px); }
+        .mic-btn.listening { background: #d94a4a; border-color: #ffb5b5; animation: micPulse 1.2s infinite; }
+        .mic-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+        @keyframes micPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(217,74,74,0.45); }
+            50% { box-shadow: 0 0 0 8px rgba(217,74,74,0); }
         }
 
         .send-btn {
@@ -241,9 +235,7 @@
             white-space: nowrap;
         }
 
-        .send-btn:hover {
-            transform: translateY(-1px);
-        }
+        .send-btn:hover { transform: translateY(-1px); }
 
         .contact-bar {
             background: rgba(255,255,255,0.1);
@@ -258,10 +250,7 @@
             transition: all 0.2s;
         }
 
-        .contact-bar:hover {
-            background: rgba(255,255,255,0.18);
-            color: white;
-        }
+        .contact-bar:hover { background: rgba(255,255,255,0.18); color: white; }
 
         .loading-dots span {
             display: inline-block;
@@ -273,23 +262,28 @@
             animation: bounce 1.2s infinite;
         }
 
-        .loading-dots span:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-
-        .loading-dots span:nth-child(3) {
-            animation-delay: 0.4s;
-        }
+        .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
 
         @keyframes bounce {
             0%, 80%, 100% { transform: translateY(0); }
             40% { transform: translateY(-8px); }
         }
+
+        @media (max-width: 560px) {
+            .chat-wrapper { padding: 12px 8px; }
+            .messages { padding: 14px; min-height: 430px; max-height: 58vh; }
+            .user-msg { max-width: 84%; }
+            .bot-msg { max-width: 92%; }
+            .suggestion-btn { font-size: 12px; padding: 7px 12px; }
+            .input-row { gap: 7px; }
+            .send-btn { padding: 12px 17px; }
+            .mic-btn { width: 44px; height: 44px; flex-basis: 44px; }
+        }
     </style>
 </head>
 
 <body>
-
     <div class="header">
         <h1>
             ZOOZ <span>Assistant</span>
@@ -300,10 +294,15 @@
 
     <div class="chat-wrapper">
         <div class="chat-container">
-
             <div class="messages" id="messages">
                 <div class="welcome">
-                    <div class="avatar">🤖</div>
+                    <div class="avatar">
+                        <img
+                            src="https://www.zooz.co.il/images/logo.png"
+                            alt="לוגו ZOOZ"
+                            onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';">
+                        <span class="logo-fallback">ZOOZ</span>
+                    </div>
                     <p>
                         שלום! אני העוזר הווירטואלי של ZOOZ.<br>
                         איך אוכל לעזור לך היום?
@@ -312,29 +311,10 @@
             </div>
 
             <div class="suggestions">
-                <button
-                    class="suggestion-btn"
-                    onclick="askQuestion('מה השירותים של ZOOZ?')">
-                    מה השירותים של ZOOZ?
-                </button>
-
-                <button
-                    class="suggestion-btn"
-                    onclick="askQuestion('מה זה חדשנות שיטתית?')">
-                    מה זה חדשנות שיטתית?
-                </button>
-
-                <button
-                    class="suggestion-btn"
-                    onclick="askQuestion('איך ליצור קשר?')">
-                    איך ליצור קשר?
-                </button>
-
-                <button
-                    class="suggestion-btn"
-                    onclick="askQuestion('מה ZOOZ יכולה לעשות עבורי?')">
-                    מה ZOOZ יכולה לעשות עבורי?
-                </button>
+                <button class="suggestion-btn" onclick="askQuestion('מה השירותים של ZOOZ?')">מה השירותים של ZOOZ?</button>
+                <button class="suggestion-btn" onclick="askQuestion('מה זה חדשנות שיטתית?')">מה זה חדשנות שיטתית?</button>
+                <button class="suggestion-btn" onclick="askQuestion('איך ליצור קשר?')">איך ליצור קשר?</button>
+                <button class="suggestion-btn" onclick="askQuestion('מה ZOOZ יכולה לעשות עבורי?')">מה ZOOZ יכולה לעשות עבורי?</button>
             </div>
 
             <div class="input-row">
@@ -342,26 +322,29 @@
                     type="text"
                     id="question"
                     placeholder="כתוב את שאלתך כאן..."
+                    aria-label="שאלה ל-ZOOZ Assistant"
                     onkeypress="if(event.key==='Enter') sendQuestion()">
 
                 <button
-                    class="send-btn"
-                    onclick="sendQuestion()">
-                    שלח ➤
+                    class="mic-btn"
+                    id="micBtn"
+                    type="button"
+                    onclick="toggleDictation()"
+                    aria-label="הכתבה קולית"
+                    title="הכתבה קולית">
+                    🎤
                 </button>
+
+                <button class="send-btn" onclick="sendQuestion()">שלח ➤</button>
             </div>
 
-            <a
-                href="mailto:info@zooz.co.il"
-                class="contact-bar">
+            <a href="mailto:info@zooz.co.il" class="contact-bar">
                 📧 צור קשר עם ZOOZ — info@zooz.co.il
             </a>
-
         </div>
     </div>
 
     <script>
-
         function escapeHtml(value) {
             return String(value ?? '')
                 .replace(/&/g, '&amp;')
@@ -371,35 +354,15 @@
                 .replace(/'/g, '&#039;');
         }
 
-
         function formatAnswer(answer) {
             let formatted = escapeHtml(answer);
-
-            /*
-             * Convert:
-             * **text**
-             * into real bold text.
-             */
-            formatted = formatted.replace(
-                /\*\*(.+?)\*\*/g,
-                '<strong>$1</strong>'
-            );
-
-            /*
-             * Preserve line breaks.
-             */
-            formatted = formatted.replace(
-                /\n/g,
-                '<br>'
-            );
-
+            formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            formatted = formatted.replace(/\n/g, '<br>');
             return formatted;
         }
 
-
         function isFallbackAnswer(answer) {
             const text = String(answer || '').trim();
-
             const fallbackPatterns = [
                 'אין לי מידע מדויק',
                 'אין לי מידע במקורות',
@@ -407,75 +370,40 @@
                 'אין לי מידע במקורות של ZOOZ',
                 'אני יכול לעזור רק בנושאים הקשורים ל-ZOOZ',
                 'לא אמציא תשובה',
-                'אירעה שגיאה טכנית'
+                'אירעה שגיאה טכנית',
+                'אירעה שגיאה זמנית',
+                'השירות עמוס זמנית'
             ];
-
-            return fallbackPatterns.some(
-                pattern => text.includes(pattern)
-            );
+            return fallbackPatterns.some(pattern => text.includes(pattern));
         }
 
-
         function createSourcesHtml(sources, answer) {
-
-            /*
-             * If the assistant says that there is no reliable
-             * information, do not show unrelated retrieval sources.
-             */
-            if (
-                isFallbackAnswer(answer) ||
-                !Array.isArray(sources) ||
-                sources.length === 0
-            ) {
+            if (isFallbackAnswer(answer) || !Array.isArray(sources) || sources.length === 0) {
                 return '';
             }
 
-            /*
-             * Remove duplicate URLs.
-             */
-            const uniqueSources = [
-                ...new Set(sources.filter(Boolean))
-            ];
-
+            const uniqueSources = [...new Set(sources.filter(Boolean))];
             const links = uniqueSources
                 .map((url, index) => {
-
                     try {
                         const parsedUrl = new URL(url);
-
-                        /*
-                         * Only allow normal web links.
-                         */
-                        if (
-                            parsedUrl.protocol !== 'http:' &&
-                            parsedUrl.protocol !== 'https:'
-                        ) {
+                        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
                             return '';
                         }
-
                         const safeUrl = escapeHtml(url);
-
                         return `
-                            <a
-                                href="${safeUrl}"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="${safeUrl}">
+                            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="${safeUrl}">
                                 מקור ${index + 1}
                             </a>
                         `;
-
                     } catch (error) {
                         return '';
                     }
-
                 })
                 .filter(Boolean)
                 .join('');
 
-            if (!links) {
-                return '';
-            }
+            if (!links) return '';
 
             return `
                 <div class="sources">
@@ -485,183 +413,148 @@
             `;
         }
 
-
         function askQuestion(q) {
             document.getElementById('question').value = q;
             sendQuestion();
         }
 
+        let recognition = null;
+        let isListening = false;
 
-        function sendQuestion() {
+        function setMicState(listening) {
+            isListening = listening;
+            const micBtn = document.getElementById('micBtn');
+            if (!micBtn) return;
+            micBtn.classList.toggle('listening', listening);
+            micBtn.textContent = listening ? '⏹' : '🎤';
+            micBtn.title = listening ? 'עצור הכתבה' : 'הכתבה קולית';
+        }
 
-            const input =
-                document.getElementById('question');
+        function initSpeechRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const micBtn = document.getElementById('micBtn');
 
-            const q =
-                input.value.trim();
-
-            if (!q) {
+            if (!SpeechRecognition) {
+                if (micBtn) {
+                    micBtn.disabled = true;
+                    micBtn.title = 'הכתבה קולית אינה נתמכת בדפדפן זה';
+                }
                 return;
             }
 
-            const messages =
-                document.getElementById('messages');
+            recognition = new SpeechRecognition();
+            recognition.lang = 'he-IL';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
 
+            recognition.onstart = () => setMicState(true);
 
-            /*
-             * Display the user's question safely.
-             */
+            recognition.onresult = event => {
+                const transcript = event.results?.[0]?.[0]?.transcript || '';
+                const input = document.getElementById('question');
+                if (transcript && input) {
+                    input.value = transcript.trim();
+                    input.focus();
+                }
+            };
+
+            recognition.onerror = event => {
+                console.warn('Speech recognition error:', event.error);
+                setMicState(false);
+            };
+
+            recognition.onend = () => setMicState(false);
+        }
+
+        function toggleDictation() {
+            if (!recognition) return;
+            try {
+                if (isListening) {
+                    recognition.stop();
+                } else {
+                    recognition.start();
+                }
+            } catch (error) {
+                console.warn('Could not toggle speech recognition:', error);
+                setMicState(false);
+            }
+        }
+
+        function sendQuestion() {
+            const input = document.getElementById('question');
+            const q = input.value.trim();
+            if (!q) return;
+
+            if (isListening && recognition) {
+                try { recognition.stop(); } catch (error) { console.warn(error); }
+            }
+
+            const messages = document.getElementById('messages');
+            const loadingId = `loading-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
             messages.innerHTML += `
-                <div class="user-msg">
-                    ${escapeHtml(q)}
+                <div class="user-msg">${escapeHtml(q)}</div>
+                <div class="clearfix"></div>
+                <div class="bot-msg" id="${loadingId}">
+                    <div class="loading-dots"><span></span><span></span><span></span></div>
                 </div>
                 <div class="clearfix"></div>
             `;
-
-
-            /*
-             * Loading animation.
-             */
-            messages.innerHTML += `
-                <div
-                    class="bot-msg"
-                    id="loading">
-
-                    <div class="loading-dots">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                    </div>
-
-                </div>
-
-                <div class="clearfix"></div>
-            `;
-
 
             input.value = '';
-
-            messages.scrollTop =
-                messages.scrollHeight;
-
+            messages.scrollTop = messages.scrollHeight;
 
             fetch('/ask', {
-
                 method: 'POST',
-
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-
-                body: JSON.stringify({
-                    question: q
-                })
-
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: q })
             })
-
             .then(response => {
-
-                if (!response.ok) {
-                    throw new Error(
-                        `HTTP ${response.status}`
-                    );
-                }
-
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 return response.json();
             })
-
             .then(data => {
+                const loading = document.getElementById(loadingId);
+                if (loading) loading.remove();
 
-                const loading =
-                    document.getElementById('loading');
-
-                if (loading) {
-                    loading.remove();
-                }
-
-
-                /*
-                 * Handle unexpected API errors.
-                 */
                 if (data.error) {
-
                     messages.innerHTML += `
-                        <div class="bot-msg">
-                            אירעה שגיאה, נסה שוב.
-                        </div>
+                        <div class="bot-msg">אירעה שגיאה זמנית, נסה שוב בעוד רגע.</div>
                         <div class="clearfix"></div>
                     `;
-
-                    messages.scrollTop =
-                        messages.scrollHeight;
-
+                    messages.scrollTop = messages.scrollHeight;
                     return;
                 }
 
-
-                const answer =
-                    data.answer || 'לא התקבלה תשובה.';
-
-
-                const formattedAnswer =
-                    formatAnswer(answer);
-
-
-                const sourcesHtml =
-                    createSourcesHtml(
-                        data.sources,
-                        answer
-                    );
-
+                const answer = data.answer || 'לא התקבלה תשובה.';
+                const formattedAnswer = formatAnswer(answer);
+                const sourcesHtml = createSourcesHtml(data.sources, answer);
 
                 messages.innerHTML += `
                     <div class="bot-msg">
                         ${formattedAnswer}
                         ${sourcesHtml}
                     </div>
-
                     <div class="clearfix"></div>
                 `;
-
-
-                messages.scrollTop =
-                    messages.scrollHeight;
+                messages.scrollTop = messages.scrollHeight;
             })
-
             .catch(error => {
-
-                console.error(
-                    'Chat request failed:',
-                    error
-                );
-
-                const loading =
-                    document.getElementById('loading');
+                console.error('Chat request failed:', error);
+                const loading = document.getElementById(loadingId);
+                const errorHtml = '<div class="bot-msg">אירעה שגיאה זמנית, נסה שוב בעוד רגע.</div>';
 
                 if (loading) {
-
-                    loading.outerHTML = `
-                        <div class="bot-msg">
-                            אירעה שגיאה, נסה שוב.
-                        </div>
-                    `;
-
+                    loading.outerHTML = errorHtml;
                 } else {
-
-                    messages.innerHTML += `
-                        <div class="bot-msg">
-                            אירעה שגיאה, נסה שוב.
-                        </div>
-                        <div class="clearfix"></div>
-                    `;
+                    messages.innerHTML += `${errorHtml}<div class="clearfix"></div>`;
                 }
-
-                messages.scrollTop =
-                    messages.scrollHeight;
+                messages.scrollTop = messages.scrollHeight;
             });
         }
 
+        document.addEventListener('DOMContentLoaded', initSpeechRecognition);
     </script>
-
 </body>
 </html>
