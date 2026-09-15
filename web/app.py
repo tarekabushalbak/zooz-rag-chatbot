@@ -34,15 +34,34 @@ MULTIPLICATION_SOURCES = [
     "https://www.zooz.co.il/2-Innovation-tools.shtml",
     "https://www.zooz.co.il/2-Product-Innovation.shtml",
 ]
+INVENTIVE_TOOLS_SOURCES = [
+    "https://www.zooz.co.il/2-Innovation-tools.shtml",
+    "https://www.zooz.co.il/2-Product-Innovation.shtml",
+]
 
 ARI_ZOOZ_URL = "https://www.zooz.co.il/about_team.shtml"
 ARI_LINKEDIN_URL = "https://www.linkedin.com/in/ari-manor-878924"
 ARI_FOLLOWUP_SOURCES = [ARI_ZOOZ_URL, ARI_LINKEDIN_URL]
 
 TRIZ_SOURCES = [
-    "https://www.zooz.co.il/personel_services_methods.shtml",
+    "https://www.zooz.co.il/2-Innovation-methods.shtml",
     "https://www.zooz.co.il/2-Technological-innovation.shtml",
     "https://www.zooz.co.il/2-Innovation-tools.shtml",
+]
+
+GEOGRAPHY_SOURCES = [
+    ARI_ZOOZ_URL,
+    "https://www.zooz.co.il/about_clients.shtml",
+]
+
+VALUE_SOURCES = [
+    "https://www.zooz.co.il/about_profile.shtml",
+    "https://www.zooz.co.il/about_clients_rec_2.shtml",
+]
+
+GUARANTEE_SOURCES = [
+    "https://www.zooz.co.il/2-Innovation-management.shtml",
+    "https://www.zooz.co.il/2-Innovation-importance.shtml",
 ]
 
 
@@ -157,14 +176,59 @@ def _multiplication_answer():
     )
 
 
+def _is_inventive_tools_question(question):
+    q = _normalized_short_question(question)
+    return any(term in q for term in (
+        "כלי החשיבה ההמצאתית",
+        "כלי חשיבה המצאתית",
+        "ששת כלי החשיבה",
+        "שישה כלי חשיבה",
+    ))
+
+
+def _inventive_tools_answer():
+    return (
+        "**חשיבה המצאתית שיטתית (SIT)** היא שיטה מובנית ליצירת חידושים מתוך המשאבים והאילוצים הקיימים — "
+        "כלומר, חשיבה 'בתוך הקופסה'. לפי ZOOZ, היא משתמשת בשישה כלי חשיבה מרכזיים:\n\n"
+        "• **החסרה** – מסירים מרכיב קיים וגם את תפקידו, ואז מחפשים תועלת במוצר המצומצם.\n"
+        "• **הכפלה** – מוסיפים עותק של מרכיב קיים, זהה או עם שינוי, ואז בוחנים את התועלת החדשה.\n"
+        "• **איחוד** – נותנים למרכיב קיים תפקיד נוסף, לעיתים במקום מרכיב אחר.\n"
+        "• **הוספת מימד** – יוצרים או משנים תלות בין שני משתנים של המוצר או סביבתו.\n"
+        "• **חלוקה** – מחלקים רכיב או משאב ומארגנים אותו מחדש במרחב או במבנה.\n"
+        "• **התאמה לסביבה** – משנים את האינטראקציה בין המוצר לרכיבים בסביבתו כדי ליצור תועלת.\n\n"
+        "ביישום מעשי מגדירים קודם את 'העולם הסגור', מפעילים את הכלים על המרכיבים והמשתנים, ואז מפתחים ומדרגים את הרעיונות שנוצרו."
+    )
+
+
 def _is_triz_question(question):
     q = _normalized_short_question(question)
     return "triz" in q
 
 
 def _triz_answer(question):
-    """Ground a short useful TRIZ answer in official ZOOZ pages."""
+    """Ground useful TRIZ answers in direct official ZOOZ pages."""
     q = _normalized_short_question(question)
+
+    if "stage gate" in q or "stagegate" in q or "stage-gate" in (question or "").lower():
+        return (
+            "לא. לפי המידע באתר ZOOZ, **TRIZ לא פותחה על ידי ZOOZ** אלא על בסיס עבודתו של "
+            "גנריך אלטשולר ועמיתיו. גם **Stage-Gate לא פותח על ידי ZOOZ**; באתר מצוין שהכלי פותח "
+            "על ידי ד״ר רוברט ג׳. קופר.\n\n"
+            "ZOOZ מציגה את שתי המתודולוגיות כחלק מעולם כלי ושיטות החדשנות, ואף משתמשת או מלמדת שיטות שונות "
+            "בהתאם לצורך. לכן נכון לומר ש-ZOOZ עושה שימוש בידע ובכלים האלה — לא שהיא המציאה אותם."
+        )
+
+    if "sit" in q and any(term in q for term in ("הבדל", "לעומת", "בין")):
+        return (
+            "**TRIZ** היא מתודולוגיה רחבה ומורכבת לפתרון בעיות המצאתיות, המבוססת על דפוסים, סתירות ועקרונות "
+            "שזוהו מתוך פתרונות טכנולוגיים רבים. באתר ZOOZ היא מוצגת כשיטה עם יותר מ-100 כלים, המתאימה במיוחד "
+            "לפיצוח בעיות טכנולוגיות מורכבות.\n\n"
+            "**SIT** היא שיטה ממוקדת ופשוטה יותר ליישום, שהתפתחה בהשראת TRIZ. היא פועלת בגישת 'העולם הסגור' "
+            "ומשתמשת בשישה כלי חשיבה — הכפלה, חלוקה, החסרה, איחוד, הוספת מימד והתאמה לסביבה — כדי לפתח "
+            "רעיונות חדשים מתוך מרכיבים ומשאבים שכבר קיימים. בקיצור: TRIZ רחבה ומעמיקה יותר לפתרון בעיות מורכבות, "
+            "ואילו SIT מספקת מערכת קומפקטית ושיטתית לפיתוח רעיונות וחידושים."
+        )
+
     workshop_context = "סדנ" in q or "קורס" in q or "הדרכ" in q
 
     first = (
@@ -176,20 +240,68 @@ def _triz_answer(question):
 
     if workshop_context:
         second = (
-            "בהקשר של ZOOZ, TRIZ מופיעה תחת **פיצוח בעיות טכנולוגיות וחדשנות טכנולוגית**. "
-            "המטרה המעשית היא לא רק ללמוד מושגים, אלא להשתמש בעקרונות השיטה כדי לנסח בעיה, "
-            "לזהות את הסתירה המרכזית ולפתח כיווני פתרון באופן שיטתי. אם תרצה, אפשר לשאול "
-            "אותי גם על העקרונות של TRIZ, על אופן היישום שלה או על שירותי ההדרכה והייעוץ "
-            "המתועדים באתר ZOOZ."
+            "בהקשר של ZOOZ, TRIZ מופיעה בתחום **פיצוח בעיות טכנולוגיות וחדשנות טכנולוגית**. "
+            "בדף שיטות החדשנות ZOOZ מציינת ש-TRIZ היא שיטה מורכבת מאוד, ולכן עבור בעיות מסובכות היא מעדיפה "
+            "להציע ייעוץ חיצוני של מומחי TRIZ. כלומר, הערך המתועד הוא שימוש מקצועי בשיטה לפתרון בעיות מורכבות, "
+            "ולא בהכרח סדנת TRIZ קצרה וסטנדרטית."
         )
     else:
         second = (
             "מבחינה מעשית, ZOOZ מציגה את TRIZ כחלק מעולם החדשנות הטכנולוגית ופיצוח בעיות: "
-            "מגדירים את הבעיה, מזהים סתירות או אילוצים, ומשתמשים בעקרונות שיטתיים כדי לייצר "
-            "חלופות לפתרון. היא שונה מ-SIT, אך שתיהן משמשות לחשיבה שיטתית על חדשנות."
+            "מגדירים את הבעיה, מזהים סתירות או אילוצים, ומשתמשים בעקרונות שיטתיים כדי לייצר חלופות לפתרון."
         )
 
     return f"{first}\n\n{second}"
+
+
+def _is_geographic_question(question):
+    q = _normalized_short_question(question)
+    geography = ("ארצות", "מדינות", "בחול", "בעולם", "מחוץ לישראל")
+    work = ("עבד", "עובד", "לקוחות", "פרויקט", "פעילות")
+    return any(term in q for term in geography) and any(term in q for term in work)
+
+
+def _geographic_answer():
+    return (
+        "באתר ZOOZ יש עדות ברורה לפעילות **בישראל ובעולם**, אבל לא מצאתי בו רשימה מלאה ומסודרת של המדינות "
+        "שבהן בוצעו פרויקטים. למשל, בפרופיל של ארי מנור מצוין שהוא ליווה תהליכי אסטרטגיה וחדשנות בלמעלה "
+        "מ-300 ארגונים בארץ ובעולם.\n\n"
+        "לכן לא נכון לקבוע שהפעילות הייתה בישראל בלבד, אבל גם לא נכון להמציא רשימת מדינות על סמך שמות של "
+        "חברות בינלאומיות. אם נדרשת רשימת מדינות מדויקת, צריך לקבל אותה ישירות מ-ZOOZ."
+    )
+
+
+def _is_value_without_commercial_details_question(question):
+    q = _normalized_short_question(question)
+    return "ערך" in q and any(term in q for term in ("מחיר", "לוח זמנים", "מובטח", "מובטחות", "תוצאות"))
+
+
+def _value_without_commercial_details_answer():
+    return (
+        "כן. גם בלי מחיר, לוח זמנים או הבטחת תוצאה אפשר להסביר את הערך של ZOOZ על בסיס מה שהאתר מציג בפועל: "
+        "החברה מסייעת לארגונים להשתנות כדי לצמוח, כלפי חוץ באמצעות אסטרטגיה, שיווק וניהול חדשנות, וכלפי פנים "
+        "באמצעות ייעוץ ופיתוח ארגוני ופיתוח מנהלים ועובדים.\n\n"
+        "למשל, ללקוח שמתמודד עם חדשנות אפשר להסביר ש-ZOOZ מציעה כלים וסדנאות ליצירת רעיונות, סינונם וניהול "
+        "תהליך החדשנות, לצד ליווי ארגוני כשנדרש שינוי פנימי. זה מתאר **מה החברה יכולה לתרום לתהליך** בלי להמציא "
+        "מחיר, משך עבודה או תוצאה עסקית מובטחת. את הפרטים המסחריים הספציפיים צריך לקבל ישירות מ-ZOOZ."
+    )
+
+
+def _is_guarantee_question(question):
+    q = _normalized_short_question(question)
+    return any(term in q for term in ("מבטיחה", "מבטיח", "הבטחה", "מובטחת", "מובטחות")) and any(
+        term in q for term in ("הצלחה", "תוצאות", "רווח", "מכירות", "חדשנות")
+    )
+
+
+def _guarantee_answer():
+    return (
+        "לא ניתן לומר על בסיס האתר ש-ZOOZ **מבטיחה** הצלחה או תוצאה עסקית מסוימת בעקבות תהליך חדשנות. "
+        "האתר מתאר שיטות, כלים, מטרות ותועלות אפשריות של ניהול חדשנות, אבל תיאור של מטרות או יתרונות אינו "
+        "שווה להתחייבות לתוצאה מדידה.\n\n"
+        "לכן אפשר לומר ש-ZOOZ מסייעת לארגונים לנהל חדשנות בצורה שיטתית, לפתח ולסנן רעיונות ולצמצם אי-ודאות "
+        "בתהליך. לעומת זאת, לא נכון להבטיח מראש גידול במכירות, ברווחיות או הצלחת מוצר אם אין לכך התחייבות מפורשת במקור."
+    )
 
 
 def _is_ari_question(question):
@@ -219,7 +331,20 @@ def _history_is_about_ari(history):
     return _is_ari_question(combined)
 
 
-def _ari_followup_answer():
+def _ari_followup_answer(history):
+    previous_question = ""
+    if history:
+        previous_question = _normalized_short_question(history[-1].get("question", ""))
+
+    if previous_question in {
+        "זהו", "רק זה", "יש עוד", "מה עוד", "ומה עוד", "תפרט", "תפרט יותר", "אפשר להרחיב"
+    }:
+        return (
+            "זה עיקר המידע הנוסף והמאומת שמצאתי במקורות הזמינים על ארי מנור. כדי לא לחזור על אותם פרטים, "
+            "לא אוסיף מידע שלא מופיע במקורות. אם תרצה, אפשר להתמקד בנושא מסוים בפרופיל שלו — למשל ניסיון בחדשנות, "
+            "אסטרטגיה ושיווק, תפקידים קודמים או פעילות בינלאומית."
+        )
+
     return (
         "כן. מעבר לפרטים שכבר ציינתי, בפרופיל ה-LinkedIn הציבורי של ארי מנור הוא מציג את עצמו "
         "כמומחה לאסטרטגיה ושיווק וכמנהל בינלאומי בכיר. תחומי ההתמחות שמופיעים שם כוללים, בין היתר, "
@@ -443,6 +568,35 @@ def _log_local_response(
     )
 
 
+def _return_local_answer(
+    *,
+    asked_at,
+    started_at,
+    conversation_id,
+    question,
+    answer,
+    sources,
+    remember=True,
+    status="OK",
+):
+    response_time = time.perf_counter() - started_at
+    if remember:
+        _remember_turn(conversation_id, question, answer)
+    _log_local_response(
+        asked_at=asked_at,
+        conversation_id=conversation_id,
+        question=question,
+        answer=answer,
+        response_time=response_time,
+        sources=sources,
+        status=status,
+    )
+    return _json_response_with_cookie(
+        {"answer": answer, "sources": sources},
+        conversation_id,
+    )
+
+
 @app.route("/ask", methods=["POST"])
 def ask():
     data = request.get_json() or {}
@@ -458,79 +612,90 @@ def ask():
     # Greetings do not need retrieval or an LLM call.
     if _is_smalltalk_question(question):
         answer = "היי! תודה, הכול טוב 😊 איך אפשר לעזור לך בנושא ZOOZ?"
-        response_time = time.perf_counter() - started_at
-        _log_local_response(
+        return _return_local_answer(
             asked_at=asked_at,
+            started_at=started_at,
             conversation_id=conversation_id,
             question=question,
             answer=answer,
-            response_time=response_time,
             sources=[],
-            status="OK",
+            remember=False,
         )
-        return _json_response_with_cookie({"answer": answer, "sources": []}, conversation_id)
 
     # The SIT multiplication tool is answered deterministically from official ZOOZ material.
     if _is_multiplication_question(question):
-        answer = _multiplication_answer()
-        sources = MULTIPLICATION_SOURCES
-        response_time = time.perf_counter() - started_at
-        _remember_turn(conversation_id, question, answer)
-        _log_local_response(
+        return _return_local_answer(
             asked_at=asked_at,
+            started_at=started_at,
             conversation_id=conversation_id,
             question=question,
-            answer=answer,
-            response_time=response_time,
-            sources=sources,
-            status="OK",
+            answer=_multiplication_answer(),
+            sources=MULTIPLICATION_SOURCES,
         )
-        return _json_response_with_cookie(
-            {"answer": answer, "sources": sources},
-            conversation_id,
+
+    # The six SIT tools are important enough for a complete deterministic answer.
+    if _is_inventive_tools_question(question):
+        return _return_local_answer(
+            asked_at=asked_at,
+            started_at=started_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=_inventive_tools_answer(),
+            sources=INVENTIVE_TOOLS_SOURCES,
         )
 
     # If Ari Manor is the current subject and the user asks for more,
     # use his public LinkedIn only as a targeted supplemental source.
-    # This does not modify or rebuild the Chroma knowledge base.
     if _is_more_followup(question) and _history_is_about_ari(history):
-        answer = _ari_followup_answer()
-        sources = ARI_FOLLOWUP_SOURCES
-        response_time = time.perf_counter() - started_at
-        _remember_turn(conversation_id, question, answer)
-        _log_local_response(
+        return _return_local_answer(
             asked_at=asked_at,
+            started_at=started_at,
             conversation_id=conversation_id,
             question=question,
-            answer=answer,
-            response_time=response_time,
-            sources=sources,
-            status="OK",
+            answer=_ari_followup_answer(history),
+            sources=ARI_FOLLOWUP_SOURCES,
         )
-        return _json_response_with_cookie(
-            {"answer": answer, "sources": sources},
-            conversation_id,
+
+    # Avoid a false country list: the site confirms international activity but not a complete list of countries.
+    if _is_geographic_question(question):
+        return _return_local_answer(
+            asked_at=asked_at,
+            started_at=started_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=_geographic_answer(),
+            sources=GEOGRAPHY_SOURCES,
+        )
+
+    if _is_value_without_commercial_details_question(question):
+        return _return_local_answer(
+            asked_at=asked_at,
+            started_at=started_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=_value_without_commercial_details_answer(),
+            sources=VALUE_SOURCES,
+        )
+
+    if _is_guarantee_question(question):
+        return _return_local_answer(
+            asked_at=asked_at,
+            started_at=started_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=_guarantee_answer(),
+            sources=GUARANTEE_SOURCES,
         )
 
     # TRIZ questions are grounded in direct official ZOOZ pages.
-    # This prevents broad phrasing such as "סדנאות TRIZ" from falling back incorrectly.
     if _is_triz_question(question):
-        answer = _triz_answer(question)
-        sources = TRIZ_SOURCES
-        response_time = time.perf_counter() - started_at
-        _remember_turn(conversation_id, question, answer)
-        _log_local_response(
+        return _return_local_answer(
             asked_at=asked_at,
+            started_at=started_at,
             conversation_id=conversation_id,
             question=question,
-            answer=answer,
-            response_time=response_time,
-            sources=sources,
-            status="OK",
-        )
-        return _json_response_with_cookie(
-            {"answer": answer, "sources": sources},
-            conversation_id,
+            answer=_triz_answer(question),
+            sources=TRIZ_SOURCES,
         )
 
     rag_question = _contextualize_question(question, history)
