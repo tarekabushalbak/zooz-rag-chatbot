@@ -199,7 +199,9 @@ def _ari_current_answer():
 
 def _is_ari_profile_question(query):
     q = _normalize(query)
-    return "ארי מנור" in q or "ari manor" in q
+    if "ארי מנור" in q or "ari manor" in q:
+        return True
+    return q in {"מי ארי", "מי זה ארי", "מי הוא ארי"}
 
 
 def _ari_profile_answer():
@@ -253,7 +255,13 @@ _KNOWN_CLIENTS = {
 def _is_specific_client_question(query):
     q = _normalize(query)
     has_zooz = "zooz" in q or "זוז" in q
-    return has_zooz and any(term in q for term in ("כלקוח", "כלקוחה", "לקוח של", "לקוחה של"))
+    if not has_zooz:
+        return False
+    if any(term in q for term in ("כלקוח", "כלקוחה", "לקוח של", "לקוחה של")):
+        return True
+    has_known_client = any(key in q for key in _KNOWN_CLIENTS)
+    asks_worked_with = "עם" in q and any(term in q for term in ("עבד", "עבדה", "עובד", "עובדת"))
+    return has_known_client and asks_worked_with
 
 
 def _specific_client_answer(query):
@@ -373,6 +381,22 @@ def _clients_answer():
         "Orange וצה״ל**.\n\n"
         "העמוד מציין במפורש שמדובר ב**אחדים מלקוחות החברה**, ולכן אלה דוגמאות מייצגות מתוך רשימה רחבה יותר, "
         "ולא רשימה מלאה."
+    )
+
+
+def _is_work_with_zooz_question(query):
+    q = _normalize(query)
+    has_zooz = "zooz" in q or "זוז" in q
+    return has_zooz and any(term in q for term in ("שווה לעבוד", "כדאי לעבוד", "האם לעבוד עם"))
+
+
+def _work_with_zooz_answer():
+    return (
+        "זה תלוי בצורך של הארגון. לפי אתר ZOOZ, החברה מציעה ייעוץ והדרכה בתחומי **אסטרטגיה, שיווק, "
+        "חדשנות ופיתוח ארגוני**, ומציגה באתר גם דוגמאות לפרויקטים וללקוחות. אם האתגר שלך נמצא בתחומים האלה, "
+        "השירותים עשויים להיות רלוונטיים.\n\n"
+        "עם זאת, מהאתר לבדו אי אפשר לקבוע ש-ZOOZ היא הבחירה הנכונה לכל ארגון או להבטיח תוצאה עסקית מסוימת. "
+        "כדי להחליט אם יש התאמה, כדאי להגדיר את הצורך, היקף הליווי והיעדים, ואז לבדוק אותם ישירות מול ZOOZ."
     )
 
 
@@ -784,6 +808,8 @@ def _guarded_ask_zooz(query):
     if _is_clients_question(query):
         return _clients_answer(), CLIENT_SOURCES
 
+    if _is_work_with_zooz_question(query):
+        return _work_with_zooz_answer(), SERVICES_SOURCES
     if _is_services_question(query):
         return _services_answer(), SERVICES_SOURCES
 
