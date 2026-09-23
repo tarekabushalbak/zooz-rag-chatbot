@@ -4,6 +4,7 @@ import re
 import secrets
 import time
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -11,7 +12,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Flask, request, jsonify, render_template, Response
 from dotenv import load_dotenv
-from scripts.rag_engine import ask_zooz
+from scripts.rag_engine import (
+    answer_from_zooz_page_reference,
+    ask_zooz,
+    extract_zooz_reference_urls,
+    source_label_for_url,
+)
 from web.logging_store import log_interaction, export_logs_csv
 
 load_dotenv()
@@ -20,7 +26,7 @@ app = Flask(__name__)
 
 CONVERSATION_COOKIE = "zooz_conversation"
 MAX_CONVERSATIONS = 200
-MAX_TURNS = 1
+MAX_TURNS = 2
 MAX_ANSWER_CONTEXT_CHARS = 700
 _conversations = OrderedDict()
 
@@ -396,6 +402,11 @@ def _looks_like_follow_up(question):
     if q.startswith(explicit_prefixes):
         return True
 
+    # Corrections such as "ביקשתי עשר" depend on the immediately preceding
+    # request and must not be treated as a new unrelated retrieval query.
+    if q.startswith(("ביקשתי ", "אמרתי ", "התכוונתי ")):
+        return True
+
     exact_follow_ups = {
         "למה?", "למה", "איך?", "איך", "ומה עוד?", "ומה עוד", "מה עוד?", "מה עוד", "עוד?", "עוד",
         "תפרט", "תפרט יותר", "אפשר להרחיב?", "אפשר להרחיב",
@@ -418,7 +429,9 @@ def _contextualize_question(question, history):
         f"בקשת ההמשך של המשתמש: {question}\n"
         "ענה על אותו נושא בדיוק ואל תעבור לנושא אחר. "
         "אם המשתמש מבקש עוד מידע (למשל 'זהו?', 'יש עוד?' או 'מה עוד?'), "
-        "הוסף פרטים חדשים ורלוונטיים על הנושא הקודם, בלי לחזור סתם על אותה תשובה.\n"
+        "הוסף פרטים חדשים ורלוונטיים על הנושא הקודם, בלי לחזור סתם על אותה תשובה. "
+        "אם המשתמש מתקן כמות או אילוץ (למשל 'ביקשתי עשר'), כבד את התיקון, אך אל תמציא "
+        "פריטים שאינם נתמכים במקורות; אם אין מספיק דוגמאות מאומתות, אמור זאת במפורש.\n"
         f"התשובה הקודמת, לצורך מניעת חזרות בלבד: {previous_answer}\n"
         "את כל העובדות בתשובה החדשה יש לבסס רק על מקורות ZOOZ שהמערכת מאחזרת."
     )
@@ -466,6 +479,62 @@ def _clean_answer_formatting(answer):
     result = re.sub(r"(?<!\*)\*(?!\*)", "", result)
     return result
 
+
+
+
+def _previous_meaningful_question(history):
+    generic_markers = (
+        "התשובה נמצאת כאן",
+        "תושבה נמצאת כאן",
+        "ענה שוב",
+        "עני שוב",
+        "בקישור הזה",
+        "במאמר הזה",
+    )
+    for turn in reversed(history or []):
+        question = (turn.get("question") or "").strip()
+        if not question or extract_zooz_reference_urls(question):
+            continue
+        normalized = _normalized_short_question(question)
+        if len(normalized) < 45 and any(marker in normalized for marker in generic_markers):
+            continue
+        return question
+    return ""
+
+
+def _source_details(sources):
+    unique = []
+    seen = set()
+    for source in sources or []:
+        if not source or source in seen:
+            continue
+        seen.add(source)
+        unique.append(source)
+
+    if not unique:
+        return []
+
+    def build(url):
+        try:
+            title = source_label_for_url(url)
+        except Exception as exc:
+            print(f"INFO: source label lookup failed for {url}: {exc}")
+            title = ""
+        return {"url": url, "title": title or url}
+
+    # Resolve H1 labels in parallel so link labeling does not multiply latency
+    # when an answer has several sources.
+    workers = min(5, len(unique))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(executor.map(build, unique))
+
+
+def _response_payload(answer, sources):
+    return {
+        "answer": answer,
+        "sources": sources,
+        "source_details": _source_details(sources),
+    }
 
 def _is_temporary_error_answer(answer):
     text = (answer or "").strip()
@@ -593,7 +662,7 @@ def _return_local_answer(
         status=status,
     )
     return _json_response_with_cookie(
-        {"answer": answer, "sources": sources},
+        _response_payload(answer, sources),
         conversation_id,
     )
 
@@ -609,6 +678,32 @@ def ask():
     history = _get_history(conversation_id)
     asked_at = datetime.now(timezone.utc)
     started_at = time.perf_counter()
+
+    # A URL is an exact content identifier, not a semantic search phrase.
+    # When a user points to a ZOOZ page, read that exact page (or its indexed
+    # copy) and answer from it before any generic intent/guardrail handler.
+    if extract_zooz_reference_urls(question):
+        try:
+            exact_result = answer_from_zooz_page_reference(
+                question,
+                previous_question=_previous_meaningful_question(history),
+            )
+        except Exception as exc:
+            print(f"INFO: exact-page answering failed; falling back to regular RAG: {exc}")
+            exact_result = None
+
+        if exact_result:
+            answer, sources = exact_result
+            answer = _clean_answer_formatting(answer)
+            return _return_local_answer(
+                asked_at=asked_at,
+                started_at=started_at,
+                conversation_id=conversation_id,
+                question=question,
+                answer=answer,
+                sources=sources,
+                status=_interaction_status(answer, sources),
+            )
 
     # Greetings do not need retrieval or an LLM call.
     if _is_smalltalk_question(question):
@@ -727,7 +822,7 @@ def ask():
         )
 
         return _json_response_with_cookie(
-            {"answer": answer, "sources": sources},
+            _response_payload(answer, sources),
             conversation_id,
         )
 

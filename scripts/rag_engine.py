@@ -4,9 +4,11 @@ import re
 import time
 from datetime import datetime
 from functools import lru_cache
-from urllib.parse import urlparse
+from urllib.parse import unquote, urljoin, urlparse, urldefrag
 
 import chromadb
+import requests
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -38,6 +40,12 @@ CONTACT_PHONE = "09-9585085"
 MODEL = "openai/gpt-oss-20b"
 FALLBACK_MODEL = "openai/gpt-oss-120b"
 MAX_COMPLETION_TOKENS = 650
+EXACT_PAGE_MAX_CHARS = 14000
+ZOOZ_HOSTS = {"zooz.co.il", "www.zooz.co.il"}
+REFERENCE_URL_RE = re.compile(
+    r"https?://(?:www\.)?(?:zooz\.co\.il|tinyurl\.com)/[^\s<>\"']+",
+    re.IGNORECASE,
+)
 
 
 @lru_cache(maxsize=1)
@@ -56,6 +64,297 @@ def get_groq_client():
     if not api_key:
         raise RuntimeError("GROQ_API_KEY is missing")
     return Groq(api_key=api_key)
+
+
+def _clean_inline_text(text):
+    return " ".join((text or "").split())
+
+
+def _normalize_zooz_url(url):
+    raw = (url or "").strip().rstrip(".,;:!?)]}>'\"״׳")
+    if not raw:
+        return ""
+
+    raw, _ = urldefrag(raw)
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in {"http", "https"} or host not in ZOOZ_HOSTS:
+        return ""
+
+    return parsed._replace(
+        scheme="https",
+        netloc="www.zooz.co.il",
+        query="",
+        fragment="",
+    ).geturl()
+
+
+def _resolve_reference_url(url):
+    raw = (url or "").strip().rstrip(".,;:!?)]}>'\"״׳")
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").lower()
+
+    if host in ZOOZ_HOSTS:
+        return _normalize_zooz_url(raw)
+
+    # Resolve TinyURL safely one hop only. We never follow an arbitrary redirect:
+    # the Location header must already point directly to zooz.co.il.
+    if host == "tinyurl.com" and parsed.scheme in {"http", "https"}:
+        try:
+            response = requests.get(
+                raw,
+                timeout=4,
+                allow_redirects=False,
+                stream=True,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; ZOOZ-RAG/3.0)"},
+            )
+            try:
+                location = response.headers.get("location", "")
+            finally:
+                response.close()
+            if location:
+                target = urljoin(raw, location)
+                return _normalize_zooz_url(target)
+        except Exception as exc:
+            print(f"INFO: could not resolve TinyURL reference: {exc}")
+    return ""
+
+
+def extract_zooz_reference_urls(text):
+    resolved = []
+    seen = set()
+    for match in REFERENCE_URL_RE.findall(text or ""):
+        url = _resolve_reference_url(match)
+        if url and url not in seen:
+            seen.add(url)
+            resolved.append(url)
+    return resolved
+
+
+def _extract_live_page_content(soup):
+    for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "form"]):
+        tag.decompose()
+
+    blocks = []
+    seen = set()
+    for tag in soup.find_all(["h1", "h2", "h3", "h4", "p", "li", "td"]):
+        if tag.name == "td" and tag.find(["h1", "h2", "h3", "h4", "p", "li"]):
+            continue
+        text = _clean_inline_text(tag.get_text(" ", strip=True))
+        if len(text) < 12 or text in seen:
+            continue
+        seen.add(text)
+        blocks.append(text)
+
+    if not blocks:
+        text = _clean_inline_text(soup.get_text(" ", strip=True))
+    else:
+        text = "\n".join(blocks)
+
+    if len(text) > EXACT_PAGE_MAX_CHARS:
+        text = text[:EXACT_PAGE_MAX_CHARS]
+        if " " in text:
+            text = text.rsplit(" ", 1)[0]
+        text += "…"
+    return text
+
+
+@lru_cache(maxsize=160)
+def _fetch_live_zooz_page(url):
+    normalized = _normalize_zooz_url(url)
+    if not normalized:
+        return None
+
+    try:
+        response = requests.get(
+            normalized,
+            timeout=6,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ZOOZ-RAG/3.0)"},
+        )
+        response.raise_for_status()
+
+        content_type = (response.headers.get("content-type") or "").lower()
+        if content_type and "html" not in content_type:
+            return None
+
+        if not response.encoding or response.encoding.lower() in {"iso-8859-1", "ascii"}:
+            response.encoding = response.apparent_encoding or "utf-8"
+
+        soup = BeautifulSoup(response.text, "lxml")
+        h1_tag = soup.find("h1")
+        h1 = _clean_inline_text(h1_tag.get_text(" ", strip=True)) if h1_tag else ""
+        title = _clean_inline_text(soup.title.get_text(" ", strip=True)) if soup.title else ""
+        content = _extract_live_page_content(soup)
+        if not content:
+            return None
+
+        return {
+            "url": normalized,
+            "h1": h1,
+            "title": title,
+            "content": content,
+            "origin": "live",
+        }
+    except Exception as exc:
+        print(f"INFO: direct ZOOZ page fetch failed for {normalized}: {exc}")
+        return None
+
+
+def _load_indexed_zooz_page(url):
+    normalized = _normalize_zooz_url(url)
+    if not normalized:
+        return None
+
+    try:
+        collection = load_collection()
+        result = collection.get(
+            where={"url": normalized},
+            include=["documents", "metadatas"],
+        )
+        documents = [doc for doc in (result.get("documents") or []) if doc]
+        metadatas = [meta for meta in (result.get("metadatas") or []) if meta]
+        if not documents:
+            return None
+
+        content = "\n\n".join(documents)
+        if len(content) > EXACT_PAGE_MAX_CHARS:
+            content = content[:EXACT_PAGE_MAX_CHARS]
+            if " " in content:
+                content = content.rsplit(" ", 1)[0]
+            content += "…"
+
+        title = ""
+        for metadata in metadatas:
+            title = _clean_inline_text(metadata.get("title", ""))
+            if title:
+                break
+
+        return {
+            "url": normalized,
+            "h1": "",
+            "title": title,
+            "content": content,
+            "origin": "index",
+        }
+    except Exception as exc:
+        print(f"INFO: exact URL lookup in ChromaDB failed for {normalized}: {exc}")
+        return None
+
+
+def _fallback_source_label(url):
+    parsed = urlparse(url or "")
+    host = (parsed.hostname or "").lower()
+
+    if "linkedin.com" in host:
+        if "ari-manor" in parsed.path.lower():
+            return "Ari Manor – LinkedIn"
+        return "LinkedIn"
+
+    basename = unquote((parsed.path or "").rstrip("/").split("/")[-1])
+    if basename:
+        if basename.lower().endswith((".shtml", ".html", ".htm")):
+            basename = basename.rsplit(".", 1)[0]
+        return basename.replace("_", " ").replace("-", " ").strip()
+
+    return host or "מקור"
+
+
+def source_label_for_url(url):
+    normalized = _normalize_zooz_url(url)
+    if normalized:
+        page = _fetch_live_zooz_page(normalized)
+        if page:
+            # Ari asked specifically for the page H1. Fall back to <title> only
+            # on legacy pages that do not expose an H1.
+            label = page.get("h1") or page.get("title")
+            if label:
+                return _clean_inline_text(label)[:120]
+    return _fallback_source_label(url)[:120]
+
+
+def _reference_question_without_urls(question):
+    clean = REFERENCE_URL_RE.sub(" ", question or "")
+    clean = re.sub(r"\s+", " ", clean).strip(" ,;:-")
+    return clean
+
+
+def _is_generic_link_instruction(text):
+    q = _clean_inline_text(text).lower()
+    if not q:
+        return True
+    generic = (
+        "התשובה נמצאת כאן",
+        "תושבה נמצאת כאן",
+        "ענה שוב",
+        "עני שוב",
+        "בקישור הזה",
+        "במאמר הזה",
+        "כאן",
+    )
+    return len(q) < 45 and any(term in q for term in generic)
+
+
+def answer_from_zooz_page_reference(question, previous_question=""):
+    """Answer from the exact ZOOZ page the user referenced.
+
+    This is intentionally separate from semantic retrieval: a URL is an identifier,
+    not a semantic query. If the page is not present in the packaged Chroma snapshot,
+    we read the public ZOOZ page directly and ground the answer in that page only.
+    """
+    urls = extract_zooz_reference_urls(question)
+    if not urls:
+        return None
+
+    pages = []
+    for url in urls[:2]:
+        page = _fetch_live_zooz_page(url) or _load_indexed_zooz_page(url)
+        if page:
+            pages.append(page)
+
+    if not pages:
+        return None
+
+    requested = _reference_question_without_urls(question)
+    if _is_generic_link_instruction(requested):
+        previous = _reference_question_without_urls(previous_question)
+        if previous and not _is_generic_link_instruction(previous):
+            requested = previous
+        else:
+            requested = "סכם את המידע המרכזי בדף והסבר מה ניתן ללמוד ממנו."
+
+    page_context = []
+    for index, page in enumerate(pages, start=1):
+        heading = page.get("h1") or page.get("title") or source_label_for_url(page["url"])
+        page_context.append(
+            f"דף {index}\n"
+            f"כותרת: {heading}\n"
+            f"כתובת: {page['url']}\n"
+            f"תוכן הדף:\n{page['content']}"
+        )
+
+    prompt = f"""אתה העוזר הווירטואלי של חברת ZOOZ.
+
+המשתמש הפנה במפורש לדף מסוים באתר ZOOZ. ענה על בסיס תוכן הדף המצורף בלבד.
+אל תגיד שהמודל "לא אומן" על הדף. אם התשובה נמצאת בדף, חלץ אותה במדויק והסבר אותה.
+אל תערבב ידע מדפים אחרים ואל תשלים מידע שאינו נתמך בדף.
+אם השאלה מבקשת השוואה, הבדל או מתי להשתמש בכלי מסוים, שמור על ההבחנות והניסוחים שמופיעים בדף.
+ענה בעברית ברורה, עניינית ומלאה. אם הדף אינו מספק את הפרט המבוקש, אמור זאת במפורש.
+
+שאלת המשתמש:
+{requested}
+
+הדף/ים:
+{chr(10).join(page_context)}
+
+תשובה:"""
+
+    client = get_groq_client()
+    response = _create_completion(client, prompt)
+    answer = (response.choices[0].message.content or "").strip()
+    if not answer:
+        raise RuntimeError("Groq returned empty answer content for exact-page request")
+
+    return answer, [page["url"] for page in pages]
 
 
 def log_to_csv(question, answer, duration):

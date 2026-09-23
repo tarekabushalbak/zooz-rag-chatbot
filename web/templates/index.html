@@ -157,6 +157,12 @@
             transition: all 0.2s;
         }
 
+        .sources a {
+            max-width: 100%;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
         .sources a:hover { background: #d8f1fc; text-decoration: none; }
         .clearfix { clear: both; }
 
@@ -377,23 +383,58 @@
             return fallbackPatterns.some(pattern => text.includes(pattern));
         }
 
-        function createSourcesHtml(sources, answer) {
-            if (isFallbackAnswer(answer) || !Array.isArray(sources) || sources.length === 0) {
-                return '';
+        function fallbackSourceLabel(url) {
+            try {
+                const parsedUrl = new URL(url);
+                const parts = parsedUrl.pathname.split('/').filter(Boolean);
+                const last = decodeURIComponent(parts[parts.length - 1] || parsedUrl.hostname);
+                return last
+                    .replace(/\.(s?html?|pdf)$/i, '')
+                    .replace(/[_-]+/g, ' ')
+                    .trim() || parsedUrl.hostname;
+            } catch (error) {
+                return 'מקור';
+            }
+        }
+
+        function createSourcesHtml(sourceDetails, sources, answer) {
+            if (isFallbackAnswer(answer)) return '';
+
+            const items = [];
+            const seen = new Set();
+
+            if (Array.isArray(sourceDetails)) {
+                sourceDetails.forEach(item => {
+                    const url = item && item.url;
+                    if (!url || seen.has(url)) return;
+                    seen.add(url);
+                    items.push({
+                        url,
+                        title: String(item.title || '').trim() || fallbackSourceLabel(url)
+                    });
+                });
             }
 
-            const uniqueSources = [...new Set(sources.filter(Boolean))];
-            const links = uniqueSources
-                .map((url, index) => {
+            if (Array.isArray(sources)) {
+                sources.filter(Boolean).forEach(url => {
+                    if (seen.has(url)) return;
+                    seen.add(url);
+                    items.push({ url, title: fallbackSourceLabel(url) });
+                });
+            }
+
+            const links = items
+                .map(item => {
                     try {
-                        const parsedUrl = new URL(url);
+                        const parsedUrl = new URL(item.url);
                         if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
                             return '';
                         }
-                        const safeUrl = escapeHtml(url);
+                        const safeUrl = escapeHtml(item.url);
+                        const safeTitle = escapeHtml(item.title);
                         return `
                             <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="${safeUrl}">
-                                מקור ${index + 1}
+                                ${safeTitle}
                             </a>
                         `;
                     } catch (error) {
@@ -529,7 +570,7 @@
 
                 const answer = data.answer || 'לא התקבלה תשובה.';
                 const formattedAnswer = formatAnswer(answer);
-                const sourcesHtml = createSourcesHtml(data.sources, answer);
+                const sourcesHtml = createSourcesHtml(data.source_details, data.sources, answer);
 
                 messages.innerHTML += `
                     <div class="bot-msg">
