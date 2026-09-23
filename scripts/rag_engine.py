@@ -269,6 +269,13 @@ def source_label_for_url(url):
             label = page.get("h1") or page.get("title")
             if label:
                 return _clean_inline_text(label)[:120]
+
+        indexed_page = _load_indexed_zooz_page(normalized)
+        if indexed_page:
+            label = indexed_page.get("title")
+            if label:
+                return _clean_inline_text(label)[:120]
+
     return _fallback_source_label(url)[:120]
 
 

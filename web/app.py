@@ -398,6 +398,12 @@ def _looks_like_follow_up(question):
         "ומה האפשרות השנייה",
         "ומה עוד לגבי",
         "ומה עוד על",
+        "בקישור הזה",
+        "מהקישור הזה",
+        "לפי הקישור הזה",
+        "לפי המאמר הזה",
+        "במאמר הזה",
+        "מהמאמר הזה",
     )
     if q.startswith(explicit_prefixes):
         return True
@@ -480,6 +486,27 @@ def _clean_answer_formatting(answer):
     return result
 
 
+
+
+def _recent_zooz_reference_url(history):
+    for turn in reversed(history or []):
+        question = (turn.get("question") or "").strip()
+        urls = extract_zooz_reference_urls(question)
+        if urls:
+            return urls[0]
+    return ""
+
+
+def _refers_to_recent_link(question):
+    q = _normalized_short_question(question)
+    return any(term in q for term in (
+        "בקישור הזה",
+        "מהקישור הזה",
+        "לפי הקישור הזה",
+        "לפי המאמר הזה",
+        "במאמר הזה",
+        "מהמאמר הזה",
+    ))
 
 
 def _previous_meaningful_question(history):
@@ -679,13 +706,22 @@ def ask():
     asked_at = datetime.now(timezone.utc)
     started_at = time.perf_counter()
 
+    # If the user says "בקישור הזה" / "לפי המאמר הזה", carry forward the
+    # most recently referenced ZOOZ URL rather than sending the phrase to
+    # semantic retrieval without the page identifier.
+    exact_question = question
+    if not extract_zooz_reference_urls(exact_question) and _refers_to_recent_link(question):
+        recent_url = _recent_zooz_reference_url(history)
+        if recent_url:
+            exact_question = f"{question} {recent_url}"
+
     # A URL is an exact content identifier, not a semantic search phrase.
     # When a user points to a ZOOZ page, read that exact page (or its indexed
     # copy) and answer from it before any generic intent/guardrail handler.
-    if extract_zooz_reference_urls(question):
+    if extract_zooz_reference_urls(exact_question):
         try:
             exact_result = answer_from_zooz_page_reference(
-                question,
+                exact_question,
                 previous_question=_previous_meaningful_question(history),
             )
         except Exception as exc:
