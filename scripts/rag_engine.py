@@ -296,9 +296,31 @@ def _is_generic_link_instruction(text):
         "עני שוב",
         "בקישור הזה",
         "במאמר הזה",
+        "לפי הקישור הזה",
+        "לפי המאמר הזה",
+        "תסביר לי יותר",
+        "תסביר יותר",
+        "תפרט",
+        "תפרט יותר",
+        "תרחיב",
+        "הרחב",
         "כאן",
     )
-    return len(q) < 45 and any(term in q for term in generic)
+    return len(q) < 70 and any(term in q for term in generic)
+
+
+def _is_anaphoric_page_followup(text):
+    q = _clean_inline_text(text).lower()
+    return any(term in q for term in (
+        "ביניהם",
+        "ביניהן",
+        "אותם",
+        "אותן",
+        "אלה",
+        "אלו",
+        "הכלים האלה",
+        "הכלים האלו",
+    ))
 
 
 def answer_from_zooz_page_reference(question, previous_question=""):
@@ -322,12 +344,21 @@ def answer_from_zooz_page_reference(question, previous_question=""):
         return None
 
     requested = _reference_question_without_urls(question)
+    previous = _reference_question_without_urls(previous_question)
+
     if _is_generic_link_instruction(requested):
-        previous = _reference_question_without_urls(previous_question)
         if previous and not _is_generic_link_instruction(previous):
-            requested = previous
+            requested = (
+                f"הרחב את התשובה לשאלה הקודמת, תוך הסתמכות על הדף בלבד: {previous}"
+            )
         else:
             requested = "סכם את המידע המרכזי בדף והסבר מה ניתן ללמוד ממנו."
+    elif _is_anaphoric_page_followup(requested) and previous:
+        requested = (
+            f"השאלה הקודמת הייתה: {previous}\n"
+            f"שאלת ההמשך היא: {requested}\n"
+            "המילים 'ביניהם/ביניהן/אלה/אלו' מתייחסות לנושא שהוגדר בשאלה הקודמת."
+        )
 
     page_context = []
     for index, page in enumerate(pages, start=1):
@@ -344,7 +375,9 @@ def answer_from_zooz_page_reference(question, previous_question=""):
 המשתמש הפנה במפורש לדף מסוים באתר ZOOZ. ענה על בסיס תוכן הדף המצורף בלבד.
 אל תגיד שהמודל "לא אומן" על הדף. אם התשובה נמצאת בדף, חלץ אותה במדויק והסבר אותה.
 אל תערבב ידע מדפים אחרים ואל תשלים מידע שאינו נתמך בדף.
+אל תוסיף שמות של שיטות, כלי-משנה, דוגמאות, אחוזים או תיאורים שאינם מופיעים במפורש בתוכן הדף שסופק.
 אם השאלה מבקשת השוואה, הבדל או מתי להשתמש בכלי מסוים, שמור על ההבחנות והניסוחים שמופיעים בדף.
+אם המשתמש משתמש בכינויי המשך כמו "ביניהם" או "הכלים האלה", פרש אותם רק לפי ההקשר שניתן בשאלת ההמשך.
 ענה בעברית ברורה, עניינית ומלאה. אם הדף אינו מספק את הפרט המבוקש, אמור זאת במפורש.
 
 שאלת המשתמש:

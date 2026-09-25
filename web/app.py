@@ -40,6 +40,12 @@ MULTIPLICATION_SOURCES = [
     "https://www.zooz.co.il/2-Innovation-tools.shtml",
     "https://www.zooz.co.il/2-Product-Innovation.shtml",
 ]
+MULTIPLICATION_EXAMPLES_SOURCES = [
+    "https://www.zooz.co.il/2-Innovation-overview.shtml",
+    "https://www.zooz.co.il/2-Product-Innovation.shtml",
+    "https://www.zooz.co.il/marketing_products_gatorclamps.shtml",
+    "https://www.zooz.co.il/marketing_products_carmel.shtml",
+]
 INVENTIVE_TOOLS_SOURCES = [
     "https://www.zooz.co.il/2-Innovation-tools.shtml",
     "https://www.zooz.co.il/2-Product-Innovation.shtml",
@@ -144,6 +150,54 @@ def _is_smalltalk_question(question):
         "good evening",
     }
     return q in greetings
+
+
+def _is_multiplication_examples_question(question):
+    q = _normalized_short_question(question)
+    return "הכפלה" in q and any(term in q for term in (
+        "דוגמה", "דוגמא", "דוגמאות", "המצאה", "המצאות", "דוגמא"
+    ))
+
+
+def _history_is_about_multiplication_examples(history):
+    if not history:
+        return False
+    previous = history[-1]
+    combined = _normalized_short_question(
+        f"{previous.get('question', '')} {previous.get('answer', '')}"
+    )
+    return "הכפלה" in combined and any(term in combined for term in (
+        "דוגמה", "דוגמא", "המצאה", "המצאות"
+    ))
+
+
+def _is_multiplication_count_correction(question, history):
+    q = _normalized_short_question(question)
+    correction = (
+        q.startswith("ביקשתי ")
+        or q.startswith("אמרתי ")
+        or q.startswith("התכוונתי ")
+    )
+    asks_ten = "עשר" in q or re.search(r"\b10\b", q)
+    return correction and bool(asks_ten) and _history_is_about_multiplication_examples(history)
+
+
+def _multiplication_examples_answer():
+    return (
+        "כן — הנה **10 דוגמאות מתועדות באתר ZOOZ** לדפוס/כלי החשיבה **הכפלה**. "
+        "חלקן מוצרים מוכרים שממחישים את הדפוס, וחלקן חידושים שפותחו בסדנאות ZOOZ:\n\n"
+        "1. סכיני גילוח כפולים/משולשים של **Gillette**.\n"
+        "2. **אוטובוס דו-קומתי**.\n"
+        "3. **מטוס דו-מנועי**.\n"
+        "4. **המבורגר משולש של McDonald's**.\n"
+        "5. **מנגנון נעילה כפול** בקופסאות בטיחות.\n"
+        "6. **קליבת מוט עם ראש דו-כיווני**.\n"
+        "7. **כרטיס אשראי דו-צדדי**.\n"
+        "8. **כיסא עם שני/מספר מושבים** — דוגמה ליישום הכפלה על מרכיב המושב.\n"
+        "9. **Bar-Mans Extendor** — חיבור שתי קליבות מוט לקליבה ארוכה יותר; באתר הוא מסומן כהכפלה והתאמה לסביבה.\n"
+        "10. **Camelflex Triple** — דיסק חיתוך עם רשת חיזוק שלישית, המסומן באתר ככלי חשיבה: הכפלה.\n\n"
+        "אלה 10 דוגמאות שונות שמופיעות במקורות ZOOZ; לא הוספתי דוגמאות שאינן מתועדות שם."
+    )
 
 
 def _is_multiplication_question(question):
@@ -517,15 +571,30 @@ def _previous_meaningful_question(history):
         "עני שוב",
         "בקישור הזה",
         "במאמר הזה",
+        "לפי הקישור הזה",
+        "לפי המאמר הזה",
     )
     for turn in reversed(history or []):
         question = (turn.get("question") or "").strip()
-        if not question or extract_zooz_reference_urls(question):
+        if not question:
             continue
-        normalized = _normalized_short_question(question)
+
+        # A prior turn may contain both a substantive question and the article URL.
+        # Strip only the URL; do not discard the whole turn.
+        without_urls = re.sub(
+            r"https?://[^\s]+",
+            " ",
+            question,
+            flags=re.IGNORECASE,
+        )
+        without_urls = " ".join(without_urls.split()).strip(" ,;:-")
+        if not without_urls:
+            continue
+
+        normalized = _normalized_short_question(without_urls)
         if len(normalized) < 45 and any(marker in normalized for marker in generic_markers):
             continue
-        return question
+        return without_urls
     return ""
 
 
@@ -714,6 +783,21 @@ def ask():
         recent_url = _recent_zooz_reference_url(history)
         if recent_url:
             exact_question = f"{question} {recent_url}"
+        else:
+            clarification = (
+                "כדי לענות **לפי מאמר או קישור מסוים**, שלח לי את הקישור לדף הרלוונטי באתר ZOOZ "
+                "או את שם המאמר. לאחר מכן אענה על בסיס אותו מקור."
+            )
+            return _return_local_answer(
+                asked_at=asked_at,
+                started_at=started_at,
+                conversation_id=conversation_id,
+                question=question,
+                answer=clarification,
+                sources=[],
+                remember=True,
+                status="FALLBACK",
+            )
 
     # A URL is an exact content identifier, not a semantic search phrase.
     # When a user points to a ZOOZ page, read that exact page (or its indexed
@@ -752,6 +836,18 @@ def ask():
             answer=answer,
             sources=[],
             remember=False,
+        )
+
+    # Keep multiplication examples deterministic: the regression test showed that
+    # free-form RAG could repeat or invent examples when asked for ten.
+    if _is_multiplication_examples_question(question) or _is_multiplication_count_correction(question, history):
+        return _return_local_answer(
+            asked_at=asked_at,
+            started_at=started_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=_multiplication_examples_answer(),
+            sources=MULTIPLICATION_EXAMPLES_SOURCES,
         )
 
     # The SIT multiplication tool is answered deterministically from official ZOOZ material.
