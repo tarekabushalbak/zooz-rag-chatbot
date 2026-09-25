@@ -4,7 +4,6 @@ import re
 import secrets
 import time
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -18,7 +17,11 @@ from scripts.rag_engine import (
     extract_zooz_reference_urls,
     source_label_for_url,
 )
-from web.logging_store import log_interaction, export_logs_csv
+from web.logging_store import (
+    export_logs_csv,
+    get_recent_conversation_turns,
+    log_interaction,
+)
 
 load_dotenv()
 
@@ -93,6 +96,15 @@ def _conversation_id():
 def _get_history(conversation_id):
     history = _conversations.get(conversation_id, [])
     if conversation_id in _conversations:
+        _conversations.move_to_end(conversation_id)
+        return history
+
+    # Recover the last turns from Postgres after a worker/instance restart.
+    # This prevents follow-up questions from losing their subject just because
+    # Render recycled the process.
+    history = get_recent_conversation_turns(conversation_id, limit=MAX_TURNS)
+    if history:
+        _conversations[conversation_id] = history[-MAX_TURNS:]
         _conversations.move_to_end(conversation_id)
     return history
 
@@ -618,11 +630,10 @@ def _source_details(sources):
             title = ""
         return {"url": url, "title": title or url}
 
-    # Resolve H1 labels in parallel so link labeling does not multiply latency
-    # when an answer has several sources.
-    workers = min(5, len(unique))
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        return list(executor.map(build, unique))
+    # Keep source-label resolution sequential. These are lightweight local
+    # Chroma metadata reads; avoiding a thread pool prevents concurrent cache/
+    # model initialization from multiplying memory use.
+    return [build(url) for url in unique]
 
 
 def _response_payload(answer, sources):

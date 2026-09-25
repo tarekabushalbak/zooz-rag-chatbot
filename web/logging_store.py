@@ -87,6 +87,41 @@ def log_interaction(
         return False
 
 
+def get_recent_conversation_turns(conversation_id, limit=2):
+    """Return recent successful turns so context survives process restarts."""
+    database_url = _database_url()
+    conversation_id = (conversation_id or "").strip()
+    if not database_url or not conversation_id:
+        return []
+
+    try:
+        safe_limit = max(1, min(int(limit or 2), 5))
+        with psycopg2.connect(database_url, connect_timeout=3) as conn:
+            with conn.cursor() as cur:
+                cur.execute(CREATE_TABLE_SQL)
+                cur.execute(
+                    """
+                    SELECT question, answer
+                    FROM chat_logs
+                    WHERE conversation_id = %s
+                      AND COALESCE(answer, '') <> ''
+                      AND status IN ('OK', 'FALLBACK')
+                    ORDER BY asked_at DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (conversation_id, safe_limit),
+                )
+                rows = cur.fetchall()
+
+        return [
+            {"question": row[0] or "", "answer": row[1] or ""}
+            for row in reversed(rows)
+        ]
+    except Exception as exc:
+        print(f"CHAT HISTORY RECOVERY ERROR: {exc}")
+        return []
+
+
 def export_logs_csv():
     """Return all stored logs as an Excel-friendly UTF-8 CSV byte stream."""
     database_url = _database_url()

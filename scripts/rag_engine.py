@@ -59,11 +59,24 @@ def load_collection():
 
 
 @lru_cache(maxsize=1)
+def load_read_collection():
+    """Open the existing collection for document/metadata reads only.
+
+    No embedding function is attached here, so exact-URL lookups and source labels
+    do not load the sentence-transformer model into memory.
+    """
+    client = chromadb.PersistentClient(path=CHROMA_DIR)
+    return client.get_collection(name=COLLECTION_NAME)
+
+
+@lru_cache(maxsize=1)
 def get_groq_client():
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError("GROQ_API_KEY is missing")
-    return Groq(api_key=api_key)
+    # Disable SDK-level retries. A 429 should return immediately so our own
+    # primary->fallback logic can run before Gunicorn's request timeout.
+    return Groq(api_key=api_key, max_retries=0, timeout=20.0)
 
 
 def _clean_inline_text(text):
@@ -206,7 +219,7 @@ def _load_indexed_zooz_page(url):
         return None
 
     try:
-        collection = load_collection()
+        collection = load_read_collection()
         result = collection.get(
             where={"url": normalized},
             include=["documents", "metadatas"],
@@ -262,17 +275,19 @@ def _fallback_source_label(url):
 def source_label_for_url(url):
     normalized = _normalize_zooz_url(url)
     if normalized:
+        # Prefer the local crawl for source labels. It is fast, stable, and avoids
+        # making one external HTTP request per displayed source.
+        indexed_page = _load_indexed_zooz_page(normalized)
+        if indexed_page:
+            label = indexed_page.get("h1") or indexed_page.get("title")
+            if label:
+                return _clean_inline_text(label)[:120]
+
         page = _fetch_live_zooz_page(normalized)
         if page:
             # Ari asked specifically for the page H1. Fall back to <title> only
             # on legacy pages that do not expose an H1.
             label = page.get("h1") or page.get("title")
-            if label:
-                return _clean_inline_text(label)[:120]
-
-        indexed_page = _load_indexed_zooz_page(normalized)
-        if indexed_page:
-            label = indexed_page.get("title")
             if label:
                 return _clean_inline_text(label)[:120]
 
