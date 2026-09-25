@@ -29,7 +29,7 @@ app = Flask(__name__)
 
 CONVERSATION_COOKIE = "zooz_conversation"
 MAX_CONVERSATIONS = 200
-MAX_TURNS = 2
+MAX_TURNS = 4
 MAX_ANSWER_CONTEXT_CHARS = 700
 _conversations = OrderedDict()
 
@@ -576,7 +576,7 @@ def _refers_to_recent_link(question):
 
 
 def _previous_meaningful_question(history):
-    generic_markers = (
+    pure_reference_instructions = {
         "התשובה נמצאת כאן",
         "תושבה נמצאת כאן",
         "ענה שוב",
@@ -585,7 +585,15 @@ def _previous_meaningful_question(history):
         "במאמר הזה",
         "לפי הקישור הזה",
         "לפי המאמר הזה",
-    )
+        "תסביר לי יותר לפי הקישור הזה",
+        "תסביר יותר לפי הקישור הזה",
+        "תסביר לי לפי הקישור הזה",
+        "תפרט לפי הקישור הזה",
+        "תסביר לי יותר לפי המאמר הזה",
+        "תסביר יותר לפי המאמר הזה",
+        "תסביר לי לפי המאמר הזה",
+        "תפרט לפי המאמר הזה",
+    }
     for turn in reversed(history or []):
         question = (turn.get("question") or "").strip()
         if not question:
@@ -604,8 +612,11 @@ def _previous_meaningful_question(history):
             continue
 
         normalized = _normalized_short_question(without_urls)
-        if len(normalized) < 45 and any(marker in normalized for marker in generic_markers):
+        if normalized in pure_reference_instructions:
             continue
+
+        # "מה ההבדל בין כלי החשיבה לפי המאמר הזה?" is substantive even
+        # though it contains a reference phrase.
         return without_urls
     return ""
 
@@ -820,8 +831,22 @@ def ask():
                 previous_question=_previous_meaningful_question(history),
             )
         except Exception as exc:
-            print(f"INFO: exact-page answering failed; falling back to regular RAG: {exc}")
-            exact_result = None
+            print(f"INFO: exact-page answering failed: {exc}")
+            exact_sources = extract_zooz_reference_urls(exact_question)
+            answer = (
+                "השירות עמוס זמנית ולכן לא הצלחתי להשלים כרגע את הניתוח של הדף הספציפי. "
+                "נסה שוב בעוד כמה שניות; הקישור עצמו זוהה ואשמור את המענה ממוקד באותו דף."
+            )
+            return _return_local_answer(
+                asked_at=asked_at,
+                started_at=started_at,
+                conversation_id=conversation_id,
+                question=question,
+                answer=answer,
+                sources=exact_sources,
+                remember=True,
+                status="ERROR",
+            )
 
         if exact_result:
             answer, sources = exact_result

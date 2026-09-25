@@ -338,6 +338,61 @@ def _is_anaphoric_page_followup(text):
     ))
 
 
+def _page_query_terms(text):
+    tokens = re.findall(r"[A-Za-z0-9\u0590-\u05FF]+", (text or "").lower())
+    stopwords = {
+        "לפי", "הזה", "הזאת", "מה", "איך", "למה", "של", "על", "עם", "את",
+        "בין", "ומה", "תסביר", "תפרט", "יותר", "המאמר", "הקישור", "דף",
+        "this", "the", "and", "from", "with", "page", "article",
+    }
+    return {token for token in tokens if len(token) >= 3 and token not in stopwords}
+
+
+def _select_exact_page_excerpt(content, query, max_chars=6200):
+    """Select the most relevant article blocks without loading embeddings."""
+    text = (content or "").strip()
+    if len(text) <= max_chars:
+        return text
+
+    blocks = [block.strip() for block in re.split(r"\n{1,2}", text) if block.strip()]
+    terms = _page_query_terms(query)
+    if not blocks:
+        return text[:max_chars]
+
+    scored = []
+    for index, block in enumerate(blocks):
+        lowered = block.lower()
+        score = sum(1 for term in terms if term in lowered)
+        if score:
+            scored.append((score, index))
+
+    if not scored:
+        return text[:max_chars]
+
+    selected_indices = set()
+    for _, index in sorted(scored, key=lambda x: (-x[0], x[1]))[:12]:
+        selected_indices.update({
+            max(0, index - 1),
+            index,
+            min(len(blocks) - 1, index + 1),
+        })
+
+    pieces = []
+    used = 0
+    for index in sorted(selected_indices):
+        block = blocks[index]
+        addition = len(block) + (2 if pieces else 0)
+        if used + addition > max_chars:
+            remaining = max_chars - used
+            if remaining > 120:
+                pieces.append(block[:remaining].rsplit(" ", 1)[0] + "…")
+            break
+        pieces.append(block)
+        used += addition
+
+    return "\n\n".join(pieces) if pieces else text[:max_chars]
+
+
 def answer_from_zooz_page_reference(question, previous_question=""):
     """Answer from the exact ZOOZ page the user referenced.
 
@@ -351,7 +406,9 @@ def answer_from_zooz_page_reference(question, previous_question=""):
 
     pages = []
     for url in urls[:2]:
-        page = _fetch_live_zooz_page(url) or _load_indexed_zooz_page(url)
+        # Prefer the local crawl/index. It is the same corpus used by RAG and
+        # avoids the 403 that zooz.co.il currently returns to Render.
+        page = _load_indexed_zooz_page(url) or _fetch_live_zooz_page(url)
         if page:
             pages.append(page)
 
@@ -378,16 +435,18 @@ def answer_from_zooz_page_reference(question, previous_question=""):
     page_context = []
     for index, page in enumerate(pages, start=1):
         heading = page.get("h1") or page.get("title") or source_label_for_url(page["url"])
+        excerpt = _select_exact_page_excerpt(page["content"], requested)
         page_context.append(
             f"דף {index}\n"
             f"כותרת: {heading}\n"
             f"כתובת: {page['url']}\n"
-            f"תוכן הדף:\n{page['content']}"
+            f"תוכן רלוונטי מהדף:\n{excerpt}"
         )
 
     prompt = f"""אתה העוזר הווירטואלי של חברת ZOOZ.
 
 המשתמש הפנה במפורש לדף מסוים באתר ZOOZ. ענה על בסיס תוכן הדף המצורף בלבד.
+ענה קודם כל על השאלה המדויקת שנשאלה; אל תחליף אותה בסיכום כללי של המאמר.
 אל תגיד שהמודל "לא אומן" על הדף. אם התשובה נמצאת בדף, חלץ אותה במדויק והסבר אותה.
 אל תערבב ידע מדפים אחרים ואל תשלים מידע שאינו נתמך בדף.
 אל תוסיף שמות של שיטות, כלי-משנה, דוגמאות, אחוזים או תיאורים שאינם מופיעים במפורש בתוכן הדף שסופק.
@@ -404,7 +463,7 @@ def answer_from_zooz_page_reference(question, previous_question=""):
 תשובה:"""
 
     client = get_groq_client()
-    response = _create_completion(client, prompt)
+    response = _create_completion(client, prompt, max_tokens=450)
     answer = (response.choices[0].message.content or "").strip()
     if not answer:
         raise RuntimeError("Groq returned empty answer content for exact-page request")
@@ -564,12 +623,12 @@ def _is_rate_limit_error(exc):
     return status == 429 or "rate limit" in text or "rate_limit_exceeded" in text
 
 
-def _create_completion(client, prompt):
+def _create_completion(client, prompt, max_tokens=MAX_COMPLETION_TOKENS):
     """Use the main model and fail over to a second Groq model on a 429 limit."""
     common = {
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.1,
-        "max_tokens": MAX_COMPLETION_TOKENS,
+        "max_tokens": max_tokens,
     }
 
     try:

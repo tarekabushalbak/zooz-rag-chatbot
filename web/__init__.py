@@ -763,18 +763,9 @@ def _guarded_response_guidance(query):
 
 
 def _call_original_with_one_retry(query):
-    answer, sources = _ORIGINAL_ASK_ZOOZ(query)
-    text = (answer or "").strip()
-    temporary = text.startswith("אירעה שגיאה זמנית") or text.startswith("השירות עמוס זמנית")
-    if not temporary:
-        return answer, sources
-
-    retry_answer, retry_sources = _ORIGINAL_ASK_ZOOZ(query)
-    retry_text = (retry_answer or "").strip()
-    retry_temporary = retry_text.startswith("אירעה שגיאה זמנית") or retry_text.startswith("השירות עמוס זמנית")
-    if not retry_temporary:
-        return retry_answer, retry_sources
-    return answer, sources
+    # The underlying engine already performs primary->fallback model failover.
+    # A second full RAG pass under rate limits can exceed the request timeout.
+    return _ORIGINAL_ASK_ZOOZ(query)
 
 
 def _guarded_ask_zooz(query):
