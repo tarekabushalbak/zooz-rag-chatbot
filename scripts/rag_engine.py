@@ -331,27 +331,39 @@ def _reference_question_without_urls(question):
 
 
 def _is_generic_link_instruction(text):
-    q = _clean_inline_text(text).lower()
+    q = _clean_inline_text(text).lower().strip(" ?!.,;:")
     if not q:
         return True
-    generic = (
+
+    # Only truly generic instructions should be treated as generic. A substantive
+    # question such as "מה ההבדל בין כלי החשיבה לפי המאמר הזה?" must keep its
+    # actual task even though it contains the phrase "לפי המאמר הזה".
+    generic_exact = {
         "התשובה נמצאת כאן",
         "תושבה נמצאת כאן",
         "ענה שוב",
         "עני שוב",
+        "ענה שוב לפי הקישור הזה",
+        "עני שוב לפי הקישור הזה",
         "בקישור הזה",
         "במאמר הזה",
         "לפי הקישור הזה",
         "לפי המאמר הזה",
         "תסביר לי יותר",
         "תסביר יותר",
+        "תסביר לי יותר לפי הקישור הזה",
+        "תסביר יותר לפי הקישור הזה",
+        "תסביר לי יותר לפי המאמר הזה",
+        "תסביר יותר לפי המאמר הזה",
         "תפרט",
         "תפרט יותר",
+        "תפרט לפי הקישור הזה",
+        "תפרט לפי המאמר הזה",
         "תרחיב",
         "הרחב",
         "כאן",
-    )
-    return len(q) < 70 and any(term in q for term in generic)
+    }
+    return q in generic_exact
 
 
 def _is_anaphoric_page_followup(text):
@@ -434,6 +446,17 @@ def _article15_thinking_tools_answer(requested):
     )
     if not any(marker in q for marker in comparison_markers):
         return None
+
+    if "הרחב" in q or "תסביר" in q or "תפרט" in q:
+        return (
+            "לפי המאמר הזה עצמו, **אין בו השוואה מלאה בין כמה כלי חשיבה שונים**. "
+            "הכלי שהמאמר מסביר בתוך גוף התוכן הוא **שיטת ששת כובעי החשיבה של דה־בונו**, "
+            "והוא מציג אותה ככלי לדיון ברעיונות ולקבלת החלטה מסודרת: לאפשר נקודות מבט שונות, "
+            "לצמצם ויכוחי סרק ולסייע לקבוצה להגיע להחלטה מושכלת.\n\n"
+            "המאמר אינו מפרט באותו מקום את SIT או SCAMPER באופן שמאפשר להשוות ביניהם לבין "
+            "ששת הכובעים. לכן, כדי לתת השוואה אמינה בין הכלים, צריך לעבור לדפי ZOOZ שמציגים "
+            "את הכלים האלה במפורש — ולא להסיק אותה מרשימת קישורים או מידע משלים."
+        )
 
     return (
         "לפי המאמר הזה עצמו, **אין בו השוואה מלאה בין כמה כלי חשיבה שונים**. "
