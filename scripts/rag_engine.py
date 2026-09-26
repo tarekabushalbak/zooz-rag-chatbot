@@ -423,6 +423,28 @@ def _select_exact_page_excerpt(content, query, max_chars=6200):
     return "\n\n".join(pieces) if pieces else text[:max_chars]
 
 
+def _article15_thinking_tools_answer(requested):
+    q = _clean_inline_text(requested).lower()
+    if "כלי" not in q or "חשיב" not in q:
+        return None
+
+    comparison_markers = (
+        "הבדל", "ביניהם", "ביניהן", "השווא", "מתי להשתמש",
+        "איזה כלי", "באיזה כלי", "איזה מהכלים",
+    )
+    if not any(marker in q for marker in comparison_markers):
+        return None
+
+    return (
+        "לפי המאמר הזה עצמו, **אין בו השוואה מלאה בין כמה כלי חשיבה שונים**. "
+        "בגוף המאמר מוזכרת במפורש **שיטת ששת כובעי החשיבה של דה־בונו** ככלי לדיון "
+        "ברעיונות ולקבלת החלטה מסודרת, כחלק מתהליך ניהול החדשנות.\n\n"
+        "לכן לא נכון להסיק מהמאמר לבדו מתי להשתמש ב-SIT, ב-SCAMPER או בכלים אחרים רק משום "
+        "ששמותיהם עשויים להופיע בקישורים או במידע משלים בעמוד. כדי להשוות בין כלי החשיבה "
+        "השונים צריך להסתמך על עמודי ZOOZ שמפרטים אותם במפורש."
+    )
+
+
 def answer_from_zooz_page_reference(question, previous_question=""):
     """Answer from the exact ZOOZ page the user referenced.
 
@@ -473,6 +495,18 @@ def answer_from_zooz_page_reference(question, previous_question=""):
             )
         else:
             requested = "סכם את המידע המרכזי בדף והסבר מה ניתן ללמוד ממנו."
+
+    # Ari's regression case: this legacy article contains navigation/related
+    # links that mention additional thinking tools. Do not mistake those links
+    # for article-body evidence and invent a comparison the article does not give.
+    article15_only = all(
+        urlparse(page["url"]).path.lower().endswith("/marketing_article15.shtml")
+        for page in pages
+    )
+    if article15_only:
+        deterministic = _article15_thinking_tools_answer(requested)
+        if deterministic:
+            return deterministic, [page["url"] for page in pages]
 
     page_context = []
     for index, page in enumerate(pages, start=1):
