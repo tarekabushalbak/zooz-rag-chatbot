@@ -224,10 +224,21 @@ def _load_indexed_zooz_page(url):
             where={"url": normalized},
             include=["documents", "metadatas"],
         )
-        documents = [doc for doc in (result.get("documents") or []) if doc]
-        metadatas = [meta for meta in (result.get("metadatas") or []) if meta]
-        if not documents:
+        raw_documents = result.get("documents") or []
+        raw_metadatas = result.get("metadatas") or []
+        pairs = [
+            (doc, meta or {})
+            for doc, meta in zip(raw_documents, raw_metadatas)
+            if doc
+        ]
+        if not pairs:
             return None
+
+        # Chroma does not guarantee get() order, so reconstruct page order from
+        # the chunk_index saved during indexing.
+        pairs.sort(key=lambda pair: int(pair[1].get("chunk_index", 0) or 0))
+        documents = [doc for doc, _ in pairs]
+        metadatas = [meta for _, meta in pairs]
 
         content = "\n\n".join(documents)
         if len(content) > EXACT_PAGE_MAX_CHARS:
@@ -242,9 +253,28 @@ def _load_indexed_zooz_page(url):
             if title:
                 break
 
+        # The crawler preserves semantic headings inside each chunk, but the old
+        # Chroma metadata stores only <title>. Infer the first page heading from
+        # chunk 0 so the UI can show a meaningful H1-style source label, as Ari
+        # requested, instead of "מקור 1".
+        h1 = ""
+        first_lines = [
+            _clean_inline_text(line)
+            for line in documents[0].splitlines()
+            if _clean_inline_text(line)
+        ]
+        if first_lines and title and first_lines[0] == title:
+            first_lines = first_lines[1:]
+        for candidate in first_lines[:4]:
+            if candidate == title:
+                continue
+            if 3 <= len(candidate) <= 140:
+                h1 = candidate
+                break
+
         return {
             "url": normalized,
-            "h1": "",
+            "h1": h1,
             "title": title,
             "content": content,
             "origin": "index",
@@ -418,19 +448,31 @@ def answer_from_zooz_page_reference(question, previous_question=""):
     requested = _reference_question_without_urls(question)
     previous = _reference_question_without_urls(previous_question)
 
-    if _is_generic_link_instruction(requested):
+    # A turn containing only the URL means: answer the substantive question
+    # that immediately led to the user supplying this source.
+    if not requested:
+        if previous:
+            requested = previous
+        else:
+            requested = "סכם את המידע המרכזי בדף והסבר מה ניתן ללמוד ממנו."
+
+    # Resolve pronouns before generic-link handling. Otherwise a question such as
+    # "ומה ההבדל ביניהם לפי המאמר הזה?" gets mistaken for "summarize the article".
+    elif _is_anaphoric_page_followup(requested) and previous:
+        requested = (
+            f"השאלה הקודמת הייתה: {previous}\n"
+            f"שאלת ההמשך היא: {requested}\n"
+            "המילים 'ביניהם/ביניהן/אלה/אלו' מתייחסות לנושא שהוגדר בשאלה הקודמת. "
+            "ענה על שאלת ההמשך עצמה, ולא על סיכום כללי של הדף."
+        )
+
+    elif _is_generic_link_instruction(requested):
         if previous and not _is_generic_link_instruction(previous):
             requested = (
                 f"הרחב את התשובה לשאלה הקודמת, תוך הסתמכות על הדף בלבד: {previous}"
             )
         else:
             requested = "סכם את המידע המרכזי בדף והסבר מה ניתן ללמוד ממנו."
-    elif _is_anaphoric_page_followup(requested) and previous:
-        requested = (
-            f"השאלה הקודמת הייתה: {previous}\n"
-            f"שאלת ההמשך היא: {requested}\n"
-            "המילים 'ביניהם/ביניהן/אלה/אלו' מתייחסות לנושא שהוגדר בשאלה הקודמת."
-        )
 
     page_context = []
     for index, page in enumerate(pages, start=1):
@@ -452,6 +494,7 @@ def answer_from_zooz_page_reference(question, previous_question=""):
 אל תוסיף שמות של שיטות, כלי-משנה, דוגמאות, אחוזים או תיאורים שאינם מופיעים במפורש בתוכן הדף שסופק.
 אם השאלה מבקשת השוואה, הבדל או מתי להשתמש בכלי מסוים, שמור על ההבחנות והניסוחים שמופיעים בדף.
 אם המשתמש משתמש בכינויי המשך כמו "ביניהם" או "הכלים האלה", פרש אותם רק לפי ההקשר שניתן בשאלת ההמשך.
+אם הדף אינו מציג במפורש את ההשוואה או ההבדל שהמשתמש ביקש, אמור זאת ישירות ואז ציין בקצרה רק מה כן ניתן להסיק מהדף; אל תחליף את הבקשה בסיכום כללי.
 ענה בעברית ברורה, עניינית ומלאה. אם הדף אינו מספק את הפרט המבוקש, אמור זאת במפורש.
 
 שאלת המשתמש:
