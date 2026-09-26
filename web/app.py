@@ -702,7 +702,25 @@ def _json_response_with_cookie(payload, conversation_id):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    old_conversation_id = request.cookies.get(CONVERSATION_COOKIE, "")
+    if _valid_conversation_id(old_conversation_id):
+        _conversations.pop(old_conversation_id, None)
+
+    conversation_id = uuid4().hex
+    response = app.make_response(render_template("index.html"))
+    response.set_cookie(
+        CONVERSATION_COOKIE,
+        conversation_id,
+        max_age=8 * 60 * 60,
+        httponly=True,
+        samesite="Lax",
+        secure=request.is_secure,
+    )
+    # Force a real page load on refresh/back navigation so stale conversation
+    # cookies are not silently restored from browser cache.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.route("/health")
