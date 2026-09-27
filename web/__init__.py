@@ -18,6 +18,10 @@ ARI_SOURCES = [
 ]
 TEAM_SOURCES = ["https://www.zooz.co.il/about_team.shtml"]
 CLIENT_SOURCES = ["https://www.zooz.co.il/about_clients.shtml"]
+COMPANY_HISTORY_SOURCES = [
+    "https://www.zooz.co.il/marketing_article13.shtml",
+    "https://www.zooz.co.il/about_press_release_03.shtml",
+]
 SERVICES_SOURCES = [
     "https://www.zooz.co.il/about.shtml",
     "https://www.zooz.co.il/about_profile.shtml",
@@ -104,8 +108,46 @@ def _curefacts_answer(query):
     )
 
 
+def _is_company_founding_question(query):
+    q = _normalize(query)
+    has_zooz = "zooz" in q or "זוז" in q
+    founding_terms = (
+        "מתי הוקמה",
+        "מתי הוקם",
+        "מתי נוסדה",
+        "מתי נוסד",
+        "שנת הקמה",
+        "שנת ההקמה",
+        "באיזו שנה הוקמה",
+        "באיזה שנה הוקמה",
+    )
+    return has_zooz and any(term in q for term in founding_terms)
+
+
+def _company_founding_answer(query):
+    q = _normalize(query)
+    base = (
+        "**ZOOZ הוקמה בשנת 1999 על-ידי ארי מנור.** "
+        "המידע מופיע במפורש במקורות רשמיים של ZOOZ: בראיון עם ארי מנור נכתב שהחברה הוקמה בשנת 1999, "
+        "ובהודעה לעיתונות של החברה מצוין ש-ZOOZ פועלת מאז שהוקמה ב-1999."
+    )
+
+    if "לקוחות" in q or "לקוח" in q:
+        return (
+            f"{base}\n\n"
+            "לגבי לקוחות: בעמוד הלקוחות הרשמי מופיעים, בין היתר, **Google, HP, Motorola, Intel, Cisco, "
+            "Nestlé, Coca-Cola, Unilever, תנובה, Johnson & Johnson, כתר, בנק לאומי, בנק הפועלים, "
+            "דיסקונט, Check Point, Orange וצה״ל**. האתר מדגיש שאלו רק אחדים מלקוחות החברה."
+        )
+
+    return base
+
+
 def _is_team_overview_question(query):
     q = _normalize(query)
+    has_zooz = "zooz" in q or "זוז" in q
+    if has_zooz and "צוות" in q and any(term in q for term in ("מי", "אנשי", "חברי")):
+        return True
     return any(
         term in q
         for term in (
@@ -123,10 +165,9 @@ def _is_team_overview_question(query):
 
 def _team_overview_answer():
     return (
-        "בעמוד **הצוות של ZOOZ** ארי מנור מופיע כמנכ״ל, ולצדו מופיעים אנשי מפתח ויועצים נוספים. "
-        "בין השמות שמופיעים בעמוד: **שחר מור**, **פרדי בלסן**, **דרור צורף**, **איתי הל-אור** ו**טל קופרמן**.\n\n"
-        "העמוד מציג אנשי צוות מתחומי אסטרטגיה, שיווק, ניהול, פיתוח ארגוני, חדשנות והדרכה. "
-        "זו רשימת דוגמאות מתוך עמוד הצוות הרשמי, ולא שמות שנלקחו מאזכור מקרי במאמר."
+        "בעמוד הרשמי **הצוות של ZOOZ** ארי מנור מופיע כמנכ״ל, ולצדו מופיעים אנשי מפתח ויועצים נוספים. "
+        "בין השמות שמופיעים בעמוד: **יעקב ליכטר, שחר מור, פרדי בלסן, דרור צורף, איתי הל-אור וטל קופרמן**.\n\n"
+        "זו רשימת דוגמאות מתוך עמוד הצוות הרשמי, ולא רשימה שנבנתה מאזכורים מקריים בעמודים אחרים."
     )
 
 
@@ -771,6 +812,11 @@ def _call_original_with_one_retry(query):
 def _guarded_ask_zooz(query):
     if _is_zooz_manager_question(query):
         return _zooz_manager_answer(), TEAM_SOURCES
+    if _is_company_founding_question(query):
+        sources = list(COMPANY_HISTORY_SOURCES)
+        if "לקוחות" in _normalize(query) or "לקוח" in _normalize(query):
+            sources += CLIENT_SOURCES
+        return _company_founding_answer(query), sources
     if _is_curefacts_question(query):
         return _curefacts_answer(query), ARI_SOURCES
     if _is_team_overview_question(query):

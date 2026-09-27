@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Build a compact map of page H1 headings from the structured crawl so source
+# buttons show the real page heading instead of dates, authors or body snippets.
+python scripts/build_h1_map.py
+
 pip install -r requirements.txt
 pip install gdown
 

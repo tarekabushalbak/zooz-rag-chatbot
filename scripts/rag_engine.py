@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import re
 import time
@@ -46,6 +47,18 @@ REFERENCE_URL_RE = re.compile(
     r"https?://(?:www\.)?(?:zooz\.co\.il|tinyurl\.com)/[^\s<>\"']+",
     re.IGNORECASE,
 )
+H1_MAP_PATH = os.path.join("data", "h1_map.json")
+VERIFIED_H1_OVERRIDES = {
+    "https://www.zooz.co.il/": "ZOOZ שיווק אפקטיבי",
+    "https://www.zooz.co.il/about_team.shtml": "הצוות של ZOOZ",
+    "https://www.zooz.co.il/about_clients.shtml": "הלקוחות של ZOOZ",
+    "https://www.zooz.co.il/about_profile.shtml": "פרופיל החברה",
+    "https://www.zooz.co.il/about_press_release_03.shtml": "חברת ZOOZ מעבירה תכניות פיתוח מנהלים בחברת ניאופרם",
+    "https://www.zooz.co.il/marketing_article13.shtml": '"לא מפסיק לזוז"',
+    "https://www.zooz.co.il/2-Innovation-tools.shtml": "כלי חדשנות",
+    "https://www.zooz.co.il/2-Product-Innovation.shtml": "חדשנות מוצרית",
+    "https://www.zooz.co.il/marketing_content_strategy.shtml": "אסטרטגיה",
+}
 
 
 @lru_cache(maxsize=1)
@@ -81,6 +94,25 @@ def get_groq_client():
 
 def _clean_inline_text(text):
     return " ".join((text or "").split())
+
+
+@lru_cache(maxsize=1)
+def _load_h1_map():
+    mapping = dict(VERIFIED_H1_OVERRIDES)
+    try:
+        with open(H1_MAP_PATH, "r", encoding="utf-8") as handle:
+            generated = json.load(handle)
+        if isinstance(generated, dict):
+            mapping.update({
+                str(url): _clean_inline_text(label)
+                for url, label in generated.items()
+                if url and label
+            })
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        print(f"INFO: could not load H1 map: {exc}")
+    return mapping
 
 
 def _normalize_zooz_url(url):
@@ -253,28 +285,9 @@ def _load_indexed_zooz_page(url):
             if title:
                 break
 
-        # The crawler preserves semantic headings inside each chunk, but the old
-        # Chroma metadata stores only <title>. Infer the first page heading from
-        # chunk 0 so the UI can show a meaningful H1-style source label, as Ari
-        # requested, instead of "מקור 1".
-        h1 = ""
-        first_lines = [
-            _clean_inline_text(line)
-            for line in documents[0].splitlines()
-            if _clean_inline_text(line)
-        ]
-        if first_lines and title and first_lines[0] == title:
-            first_lines = first_lines[1:]
-        for candidate in first_lines[:4]:
-            if candidate == title:
-                continue
-            if 3 <= len(candidate) <= 140:
-                h1 = candidate
-                break
-
         return {
             "url": normalized,
-            "h1": h1,
+            "h1": "",
             "title": title,
             "content": content,
             "origin": "index",
@@ -305,21 +318,22 @@ def _fallback_source_label(url):
 def source_label_for_url(url):
     normalized = _normalize_zooz_url(url)
     if normalized:
-        # Prefer the local crawl for source labels. It is fast, stable, and avoids
-        # making one external HTTP request per displayed source.
-        indexed_page = _load_indexed_zooz_page(normalized)
-        if indexed_page:
-            label = indexed_page.get("h1") or indexed_page.get("title")
-            if label:
-                return _clean_inline_text(label)[:120]
+        # Ari explicitly requested the page H1. Use the build-time map produced
+        # from the structured crawl; never guess an H1 from a date/author/body
+        # line inside a Chroma chunk.
+        mapped_h1 = _load_h1_map().get(normalized)
+        if mapped_h1:
+            return _clean_inline_text(mapped_h1)[:120]
 
         page = _fetch_live_zooz_page(normalized)
-        if page:
-            # Ari asked specifically for the page H1. Fall back to <title> only
-            # on legacy pages that do not expose an H1.
-            label = page.get("h1") or page.get("title")
-            if label:
-                return _clean_inline_text(label)[:120]
+        if page and page.get("h1"):
+            return _clean_inline_text(page["h1"])[:120]
+
+        # Some legacy pages have no usable H1 in the crawl. In that case use the
+        # HTML title as a safe fallback, rather than an arbitrary body snippet.
+        indexed_page = _load_indexed_zooz_page(normalized)
+        if indexed_page and indexed_page.get("title"):
+            return _clean_inline_text(indexed_page["title"])[:120]
 
     return _fallback_source_label(url)[:120]
 
