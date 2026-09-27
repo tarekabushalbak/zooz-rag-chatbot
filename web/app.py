@@ -53,6 +53,10 @@ INVENTIVE_TOOLS_SOURCES = [
     "https://www.zooz.co.il/2-Innovation-tools.shtml",
     "https://www.zooz.co.il/2-Product-Innovation.shtml",
 ]
+SCAMPER_SIT_SOURCES = [
+    "https://www.zooz.co.il/marketing_article15.shtml",
+    "https://www.zooz.co.il/2-Innovation-tools.shtml",
+]
 
 ARI_ZOOZ_URL = "https://www.zooz.co.il/about_team.shtml"
 ARI_LINKEDIN_URL = "https://www.linkedin.com/in/ari-manor-878924"
@@ -245,6 +249,32 @@ def _multiplication_answer():
         "מכפילים אותו ורק לאחר מכן מחפשים ערך שימושי שנוצר — למשל פונקציונליות חדשה, "
         "שיפור בחוויית המשתמש או פתרון לצורך שלא קיבל מענה קודם. המטרה אינה להכפיל סתם, "
         "אלא להשתמש בהכפלה כטריגר לרעיון חדש ומועיל."
+    )
+
+
+def _is_scamper_sit_comparison_question(question):
+    q = _normalized_short_question(question)
+    has_scamper = "scamper" in q or "סקאמפר" in q or "סקמפר" in q
+    has_sit = "sit" in q or "חשיבה המצאתית" in q
+    comparison = any(term in q for term in (
+        "הבדל",
+        "בין",
+        "לעומת",
+        "מתי להשתמש",
+        "איזו שיטה",
+        "שתי השיטות",
+    ))
+    return has_scamper and has_sit and comparison
+
+
+def _scamper_sit_comparison_answer():
+    return (
+        "לפי הניסוח שמופיע בחומר של ZOOZ, ההבדל המעשי הוא בעיקר **בסוג המשימה ובעומק התהליך**:\n\n"
+        "• **SIT / כלי חשיבה המצאתית** — מתאימים במיוחד **לשדרוג ופיתוח מוצרים ושירותים** בצורה שיטתית ומעמיקה.\n"
+        "• **SCAMPER** — מתאים במיוחד **לשיפור תהליכים ולהתייעלות לוגיסטית**, ויכול לשמש גם "
+        "כגרסה **קלה ומהירה יותר** לפיתוח מוצרים ושירותים חדשים.\n\n"
+        "לכן, אם רוצים תהליך עמוק ושיטתי של חדשנות במוצר או בשירות — SIT מתאים יותר. "
+        "אם רוצים סיעור מוחות מהיר ופשוט יותר, במיוחד לשיפור תהליך קיים או להתייעלות — SCAMPER יכול להתאים יותר."
     )
 
 
@@ -946,6 +976,18 @@ def ask():
             question=question,
             answer=_multiplication_examples_answer(),
             sources=MULTIPLICATION_EXAMPLES_SOURCES,
+        )
+
+    # Do not let quoted SCAMPER-vs-SIT questions get swallowed by the broader
+    # "inventive tools" detector just because the quotation contains that phrase.
+    if _is_scamper_sit_comparison_question(question):
+        return _return_local_answer(
+            asked_at=asked_at,
+            started_at=started_at,
+            conversation_id=conversation_id,
+            question=question,
+            answer=_scamper_sit_comparison_answer(),
+            sources=SCAMPER_SIT_SOURCES,
         )
 
     # The SIT multiplication tool is answered deterministically from official ZOOZ material.
