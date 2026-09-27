@@ -111,17 +111,15 @@ def _curefacts_answer(query):
 def _is_company_founding_question(query):
     q = _normalize(query)
     has_zooz = "zooz" in q or "זוז" in q
-    founding_terms = (
-        "מתי הוקמה",
-        "מתי הוקם",
-        "מתי נוסדה",
-        "מתי נוסד",
+    founding_verb = any(term in q for term in ("הוקמה", "הוקם", "נוסדה", "נוסד"))
+    asks_when = any(term in q for term in (
+        "מתי",
+        "באיזו שנה",
+        "באיזה שנה",
         "שנת הקמה",
         "שנת ההקמה",
-        "באיזו שנה הוקמה",
-        "באיזה שנה הוקמה",
-    )
-    return has_zooz and any(term in q for term in founding_terms)
+    ))
+    return has_zooz and founding_verb and asks_when
 
 
 def _company_founding_answer(query):
