@@ -117,7 +117,11 @@ def extract_content_blocks(soup):
             continue
 
         block_type = "heading" if tag.name in ["h1", "h2", "h3", "h4"] else "text"
-        blocks.append({"type": block_type, "text": text})
+        blocks.append({
+            "type": block_type,
+            "tag": tag.name,
+            "text": text,
+        })
 
     deduped = []
     previous = None

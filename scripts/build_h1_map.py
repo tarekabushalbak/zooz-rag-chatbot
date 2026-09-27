@@ -83,6 +83,7 @@ def choose_heading(page):
     title = clean(page.get("title"))
     title_tokens = tokens(title)
     candidates = []
+    fallback_headings = []
 
     for index, block in enumerate(blocks):
         if block.get("type") != "heading":
@@ -90,6 +91,8 @@ def choose_heading(page):
         text = clean(block.get("text"))
         if not text or text in GENERIC_HEADINGS or len(text) > 180:
             continue
+
+        fallback_headings.append((index, text))
 
         heading_tokens = tokens(text)
         if not heading_tokens:
@@ -111,16 +114,21 @@ def choose_heading(page):
         score -= index * 0.015
         candidates.append((score, index, text))
 
-    if not candidates:
-        return ""
+    if candidates:
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        best_score, _, best_text = candidates[0]
+        if best_score > 0:
+            return best_text
 
-    candidates.sort(key=lambda item: (-item[0], item[1]))
-    best_score, _, best_text = candidates[0]
+    # Legacy pages often have titles that share no exact tokens with their H1.
+    # After excluding generic sidebar headings (e.g. "יצירת קשר"), the first
+    # remaining semantic heading is a much safer fallback than a date, author
+    # line or arbitrary body text.
+    if fallback_headings:
+        fallback_headings.sort(key=lambda item: item[0])
+        return fallback_headings[0][1]
 
-    # Avoid confidently calling an unrelated sidebar heading an H1.
-    if best_score <= 0:
-        return ""
-    return best_text
+    return ""
 
 
 def main():
