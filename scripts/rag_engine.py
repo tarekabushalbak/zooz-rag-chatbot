@@ -451,35 +451,32 @@ def _select_exact_page_excerpt(content, query, max_chars=6200):
 
 def _article15_thinking_tools_answer(requested):
     q = _clean_inline_text(requested).lower()
-    if "כלי" not in q or "חשיב" not in q:
-        return None
 
+    has_scamper = "scamper" in q or "סקאמפר" in q or "סקמפר" in q
+    has_sit = "sit" in q or "חשיבה המצאתית" in q
     comparison_markers = (
         "הבדל", "ביניהם", "ביניהן", "השווא", "מתי להשתמש",
-        "איזה כלי", "באיזה כלי", "איזה מהכלים",
+        "איזה כלי", "באיזה כלי", "איזה מהכלים", "שתי השיטות",
     )
-    if not any(marker in q for marker in comparison_markers):
-        return None
 
-    if "הרחב" in q or "תסביר" in q or "תפרט" in q:
+    # Ari pointed to the explicit comparison sentence in this article:
+    # inventive-thinking tools are especially suitable for upgrading products
+    # and services, while SCAMPER is suitable for process/logistics improvement
+    # and can also serve as a lighter, faster route for new products/services.
+    if (has_scamper and has_sit) or (
+        "כלי" in q and "חשיב" in q and any(marker in q for marker in comparison_markers)
+    ):
         return (
-            "לפי המאמר הזה עצמו, **אין בו השוואה מלאה בין כמה כלי חשיבה שונים**. "
-            "הכלי שהמאמר מסביר בתוך גוף התוכן הוא **שיטת ששת כובעי החשיבה של דה־בונו**, "
-            "והוא מציג אותה ככלי לדיון ברעיונות ולקבלת החלטה מסודרת: לאפשר נקודות מבט שונות, "
-            "לצמצם ויכוחי סרק ולסייע לקבוצה להגיע להחלטה מושכלת.\n\n"
-            "המאמר אינו מפרט באותו מקום את SIT או SCAMPER באופן שמאפשר להשוות ביניהם לבין "
-            "ששת הכובעים. לכן, כדי לתת השוואה אמינה בין הכלים, צריך לעבור לדפי ZOOZ שמציגים "
-            "את הכלים האלה במפורש — ולא להסיק אותה מרשימת קישורים או מידע משלים."
+            "לפי המאמר, ההבדל המעשי הוא בעיקר **בסוג המשימה ובעומק העבודה**:\n\n"
+            "• **כלי החשיבה ההמצאתית (SIT)** מתאימים במיוחד **לשדרוג מוצרים ושירותים** בצורה שיטתית ומעמיקה.\n"
+            "• **SCAMPER** מתאים במיוחד **לשיפור תהליכים ולהתייעלות לוגיסטית**, ובנוסף יכול לשמש "
+            "כגרסה **קלה ומהירה יותר** לפיתוח מוצרים ושירותים חדשים.\n\n"
+            "לכן, כשמחפשים תהליך שיטתי ומעמיק לחדשנות במוצר או בשירות — SIT מתאים יותר; "
+            "כשמחפשים דרך מהירה ופשוטה יותר להעלות רעיונות, במיוחד לשיפור תהליך קיים או להתייעלות — "
+            "SCAMPER יכול להתאים יותר."
         )
 
-    return (
-        "לפי המאמר הזה עצמו, **אין בו השוואה מלאה בין כמה כלי חשיבה שונים**. "
-        "בגוף המאמר מוזכרת במפורש **שיטת ששת כובעי החשיבה של דה־בונו** ככלי לדיון "
-        "ברעיונות ולקבלת החלטה מסודרת, כחלק מתהליך ניהול החדשנות.\n\n"
-        "לכן לא נכון להסיק מהמאמר לבדו מתי להשתמש ב-SIT, ב-SCAMPER או בכלים אחרים רק משום "
-        "ששמותיהם עשויים להופיע בקישורים או במידע משלים בעמוד. כדי להשוות בין כלי החשיבה "
-        "השונים צריך להסתמך על עמודי ZOOZ שמפרטים אותם במפורש."
-    )
+    return None
 
 
 def answer_from_zooz_page_reference(question, previous_question=""):
