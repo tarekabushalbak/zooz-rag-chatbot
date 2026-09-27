@@ -555,11 +555,24 @@ def _clean_answer_formatting(answer):
 
 
 def _recent_zooz_reference_url(history):
+    """Return the URL from the current article thread, never from a stale topic."""
     for turn in reversed(history or []):
         question = (turn.get("question") or "").strip()
         urls = extract_zooz_reference_urls(question)
         if urls:
             return urls[0]
+
+        if not question:
+            continue
+
+        # Follow-up turns may omit the literal URL. Keep walking backwards only
+        # while the turns are clearly continuations of the same article thread.
+        if _refers_to_recent_link(question) or _is_compact_article_followup(question):
+            continue
+
+        # A substantive unrelated turn breaks the article thread. This prevents
+        # "לפי הקישור הזה" from accidentally reviving an older article.
+        return ""
     return ""
 
 
@@ -572,6 +585,34 @@ def _refers_to_recent_link(question):
         "לפי המאמר הזה",
         "במאמר הזה",
         "מהמאמר הזה",
+    ))
+
+
+def _is_compact_article_followup(question):
+    """Recognize short continuations that depend on the active exact article."""
+    q = _normalized_short_question(question)
+
+    if q in {
+        "תסביר יותר",
+        "תסביר לי יותר",
+        "תפרט",
+        "תפרט יותר",
+        "תרחיב",
+        "הרחב",
+        "ביניהם",
+        "ביניהן",
+    }:
+        return True
+
+    # Short anaphoric questions such as "ומה ההבדל ביניהם?" still depend on
+    # the article/topic established in the preceding turns.
+    return len(q) <= 100 and any(term in q for term in (
+        "ביניהם",
+        "ביניהן",
+        "הכלים האלה",
+        "הכלים האלו",
+        "אותם",
+        "אותן",
     ))
 
 
@@ -819,7 +860,10 @@ def ask():
     # most recently referenced ZOOZ URL rather than sending the phrase to
     # semantic retrieval without the page identifier.
     exact_question = question
-    if not extract_zooz_reference_urls(exact_question) and _refers_to_recent_link(question):
+    if (
+        not extract_zooz_reference_urls(exact_question)
+        and (_refers_to_recent_link(question) or _is_compact_article_followup(question))
+    ):
         recent_url = _recent_zooz_reference_url(history)
         if recent_url:
             exact_question = f"{question} {recent_url}"
