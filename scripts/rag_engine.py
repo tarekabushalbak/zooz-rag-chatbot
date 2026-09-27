@@ -58,6 +58,28 @@ VERIFIED_H1_OVERRIDES = {
     "https://www.zooz.co.il/2-Innovation-tools.shtml": "כלי חדשנות",
     "https://www.zooz.co.il/2-Product-Innovation.shtml": "חדשנות מוצרית",
     "https://www.zooz.co.il/marketing_content_strategy.shtml": "אסטרטגיה",
+    "https://www.zooz.co.il/marketing_article15.shtml": "האם הארגון שלך חדשני?",
+    "https://www.zooz.co.il/marketing_article10.shtml": "איך לחבר את הראש לגפיים",
+    "https://www.zooz.co.il/marketing_article39.shtml": "תמחור אסטרטגי - איך להתאים את התמחור לאסטרטגיה?",
+    "https://www.zooz.co.il/marketing_products_carmel.shtml": "דיסקים לחיתוך ולהשחזה - גמל-שריד",
+    "https://www.zooz.co.il/marketing_products_gatorclamps.shtml": "קליבות GatorClamps של תפנפלסט",
+    "https://www.zooz.co.il/2-Innovation-overview.shtml": "חדשנות - סקירה כללית",
+    "https://www.zooz.co.il/2-Innovation-management.shtml": "ניהול החדשנות",
+    "https://www.zooz.co.il/2-Innovation-methods.shtml": "שיטות לחדשנות",
+    "https://www.zooz.co.il/2-Innovation-glossary-300-terms.shtml": "מילון חדשנות (300 מונחים)",
+    "https://www.zooz.co.il/2-Innovation-importance.shtml": "חשיבות החדשנות",
+    "https://www.zooz.co.il/2-Technological-innovation.shtml": "חדשנות טכנולוגית",
+    "https://www.zooz.co.il/2-Service-Innovation.shtml": "חדשנות בשרות",
+    "https://www.zooz.co.il/2-Innovations-across-various-industries.shtml": "חדשנות במגוון תעשיות",
+    "https://www.zooz.co.il/2-Inspiration-for-innovation.shtml": "השראה לחדשנות",
+    "https://www.zooz.co.il/2-Inspiration-for-Innovation.shtml": "השראה לחדשנות",
+    "https://www.zooz.co.il/2-Innovation-Career.shtml": "קריירה בחדשנות",
+    "https://www.zooz.co.il/2-Innovation-and-other-disciplines.shtml": "חדשנות ותחומים אחרים",
+    "https://www.zooz.co.il/2-Innovation-examples.shtml": "דוגמאות לחדשנות",
+    "https://www.zooz.co.il/2-Innovation-goals.shtml": "יעדי החדשנות",
+    "https://www.zooz.co.il/2-Innovation-in-organizations.shtml": "חדשנות בארגונים",
+    "https://www.zooz.co.il/2-Innovation-values.shtml": "ערכי החדשנות",
+    "https://www.zooz.co.il/LaZOOZ/LaZOOZ89.html": "גיליון מספר 89",
 }
 
 
@@ -329,12 +351,14 @@ def source_label_for_url(url):
         if page and page.get("h1"):
             return _clean_inline_text(page["h1"])[:120]
 
-        # Some legacy pages have no usable H1 in the crawl. In that case use the
-        # HTML title as a safe fallback, rather than an arbitrary body snippet.
-        indexed_page = _load_indexed_zooz_page(normalized)
-        if indexed_page and indexed_page.get("title"):
-            return _clean_inline_text(indexed_page["title"])[:120]
+        # Ari asked specifically for the page H1. If a legacy ZOOZ page has no
+        # verified/crawled H1 and the live page cannot be fetched (ZOOZ may return
+        # 403 to Render), fail closed: do not substitute <title>, description,
+        # date/author text, or a URL slug and pretend it is the H1.
+        return ""
 
+    # Non-ZOOZ sources (for example Ari Manor's LinkedIn profile) keep a clear
+    # external-source label; the H1-only rule applies to ZOOZ page links.
     return _fallback_source_label(url)[:120]
 
 

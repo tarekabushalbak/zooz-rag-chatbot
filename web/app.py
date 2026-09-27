@@ -706,16 +706,28 @@ def _source_details(sources):
 
     def build(url):
         try:
-            title = source_label_for_url(url)
+            title = (source_label_for_url(url) or "").strip()
         except Exception as exc:
             print(f"INFO: source label lookup failed for {url}: {exc}")
             title = ""
-        return {"url": url, "title": title or url}
+
+        # For ZOOZ pages, source_label_for_url intentionally returns an empty
+        # string when a real H1 cannot be verified. Never fall back here to the
+        # URL, <title>, description, date or author text.
+        if not title:
+            print(f"INFO: source omitted because no verified H1 is available: {url}")
+            return None
+        return {"url": url, "title": title}
 
     # Keep source-label resolution sequential. These are lightweight local
     # Chroma metadata reads; avoiding a thread pool prevents concurrent cache/
     # model initialization from multiplying memory use.
-    return [build(url) for url in unique]
+    details = []
+    for url in unique:
+        detail = build(url)
+        if detail:
+            details.append(detail)
+    return details
 
 
 def _response_payload(answer, sources):

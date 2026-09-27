@@ -406,18 +406,26 @@
             if (Array.isArray(sourceDetails)) {
                 sourceDetails.forEach(item => {
                     const url = item && item.url;
-                    if (!url || seen.has(url)) return;
+                    const title = String(item && item.title || '').trim();
+                    if (!url || !title || seen.has(url)) return;
                     seen.add(url);
-                    items.push({
-                        url,
-                        title: String(item.title || '').trim() || fallbackSourceLabel(url)
-                    });
+                    items.push({ url, title });
                 });
             }
 
             if (Array.isArray(sources)) {
                 sources.filter(Boolean).forEach(url => {
                     if (seen.has(url)) return;
+                    try {
+                        const parsedUrl = new URL(url);
+                        const host = parsedUrl.hostname.toLowerCase();
+                        // ZOOZ links are rendered only when the backend supplied
+                        // a verified H1 in sourceDetails. Never fall back to a
+                        // slug, date, author or description for ZOOZ pages.
+                        if (host === 'zooz.co.il' || host === 'www.zooz.co.il') return;
+                    } catch (error) {
+                        return;
+                    }
                     seen.add(url);
                     items.push({ url, title: fallbackSourceLabel(url) });
                 });
